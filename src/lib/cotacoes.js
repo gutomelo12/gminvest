@@ -23,6 +23,6 @@ export async function buscar(tickers, token) {
   return saida
 }
 
-export const CHAVE_TOKEN = 'gfin.brapi.token'
+export const CHAVE_TOKEN = 'gminvest.brapi.token'
 export const lerToken = () => { try { return localStorage.getItem(CHAVE_TOKEN) || '' } catch { return '' } }
 export const salvarToken = t => { try { localStorage.setItem(CHAVE_TOKEN, t) } catch { /* ignora */ } }

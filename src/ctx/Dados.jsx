@@ -6,7 +6,7 @@ import { calcular } from '../lib/calculo'
 const Ctx = createContext(null)
 export const useDados = () => useContext(Ctx)
 
-const CHAVE_ULTIMA = 'gfin.carteira'
+const CHAVE_ULTIMA = 'gminvest.carteira'
 
 export function ProvedorDados({ children }) {
   const { usuario } = useSessao()

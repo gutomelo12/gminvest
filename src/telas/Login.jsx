@@ -15,7 +15,7 @@ export default function Login() {
 
   if (!configurado) return (
     <div className="acesso"><div className="folha">
-      <div className="marca"><div className="selo">g</div><h1>gfin</h1></div>
+      <div className="marca"><div className="selo">g</div><h1>gminvest</h1></div>
       <div className="cedula"><div className="cedula-corpo">
         <div className="aviso erro">
           <strong>Falta configurar o Supabase.</strong><br />
@@ -64,7 +64,7 @@ export default function Login() {
     <div className="acesso"><div className="folha">
       <div className="marca">
         <div className="selo">g</div>
-        <h1>gfin</h1>
+        <h1>gminvest</h1>
         <p>Carteiras de investimento independentes, uma conta por pessoa.</p>
       </div>
       <div className="cedula">

@@ -1,5 +1,5 @@
 -- ============================================================
---  gfin — esquema do banco
+--  gminvest — esquema do banco
 --  Cole este arquivo inteiro no SQL Editor do Supabase e execute.
 --  Pode ser reexecutado sem quebrar nada.
 -- ============================================================

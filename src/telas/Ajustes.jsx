@@ -59,8 +59,8 @@ export default function Ajustes() {
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" onClick={() => baixar(
-            `gfin-${semAcento(carteira.nome).replace(/\W+/g, '-')}-${hoje()}.json`,
-            JSON.stringify({ app: 'gfin', versao: 1, exportadoEm: new Date().toISOString(),
+            `gminvest-${semAcento(carteira.nome).replace(/\W+/g, '-')}-${hoje()}.json`,
+            JSON.stringify({ app: 'gminvest', versao: 1, exportadoEm: new Date().toISOString(),
               carteira: carteira.nome, operacoes, proventos }, null, 2),
             'application/json')}>Baixar .json</button>
           <button className="btn vazio" onClick={() => {
