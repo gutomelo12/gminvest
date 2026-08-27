@@ -8,7 +8,7 @@ export default function Posicoes({ ir }) {
   const totR = calc.encerradas.reduce((s, x) => s + x.realizado, 0)
   return (
     <>
-      <TabelaPosicoes posicoes={calc.abertas} ir={ir} comTeto />
+      <TabelaPosicoes posicoes={calc.abertas} ir={ir} />
       {calc.encerradas.length > 0 && (
         <Painel titulo="Posições encerradas" aoLado={`resultado ${fmtBRL(totR)}`} corpo={false}>
           <div className="rolagem">

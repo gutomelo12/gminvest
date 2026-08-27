@@ -1,9 +1,10 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useSessao } from './ctx/Sessao'
 import { ProvedorDados, useDados } from './ctx/Dados'
 import { Guilhoche, ProvedorRecibos, iniciais } from './comp/base'
-import { fmtBRL } from './lib/formato'
+import { fmtBRL, fmtHora } from './lib/formato'
 import Login from './telas/Login'
+import DefinirSenha from './telas/DefinirSenha'
 import Resumo from './telas/Resumo'
 import Posicoes from './telas/Posicoes'
 import Operacoes from './telas/Operacoes'
@@ -34,13 +35,16 @@ const TELAS = {
   alocacao:  'Alocação',
   teto:      'Preço teto',
   cotacoes:  'Cotações',
-  b3:        'Importar B3',
+  b3:        'Importações',
   ajustes:   'Ajustes',
 }
 
 export default function App() {
-  const { usuario, carregando } = useSessao()
+  const { usuario, carregando, precisaDefinirSenha } = useSessao()
   if (carregando) return <div className="carregando">Carregando…</div>
+  // vem antes de tudo — a pessoa já está autenticada pelo link do convite,
+  // mas não pode entrar de fato sem antes escolher a própria senha
+  if (precisaDefinirSenha) return <DefinirSenha />
   if (!usuario) return <Login />
   return (
     <ProvedorRecibos>
@@ -53,6 +57,35 @@ function Interior() {
   const d = useDados()
   const { sair } = useSessao()
   const [tela, setTela] = useState('resumo')
+
+  /**
+   * Busca as cotações uma vez por carteira aberta nesta sessão do
+   * navegador — não a cada troca de tela, nem de novo se você recarregar
+   * a página em seguida. Só quem pode editar dispara: leitura não grava.
+   */
+  const jaBuscou = useRef(new Set())
+  useEffect(() => {
+    if (!d.carteiraId || d.carregando || !d.podeEscrever) return
+    if (jaBuscou.current.has(d.carteiraId)) return
+    jaBuscou.current.add(d.carteiraId)
+    d.atualizarCotacoesSilenciosamente()
+  }, [d.carteiraId, d.carregando, d.podeEscrever])
+
+  /**
+   * Fotografa o patrimônio de hoje uma vez por carteira, por sessão. Espera
+   * a busca de cotações terminar antes — senão a foto sai com preço de
+   * ontem. Carteira só de renda fixa não tem cotação a buscar, então não
+   * espera nada.
+   */
+  const jaFotografou = useRef(new Set())
+  useEffect(() => {
+    if (!d.carteiraId || d.carregando || !d.podeEscrever) return
+    const pronto = !d.precisaCotar || d.statusAuto === 'ok' || d.statusAuto === 'erro'
+    if (!pronto || jaFotografou.current.has(d.carteiraId)) return
+    jaFotografou.current.add(d.carteiraId)
+    d.registrarSnapshotSilenciosamente()
+  }, [d.carteiraId, d.carregando, d.podeEscrever, d.statusAuto, d.precisaCotar])
+
   const [foco, setFoco] = useState(null)
   const [seletor, setSeletor] = useState(false)
   const [editandoOp, setEditandoOp] = useState(null)
@@ -68,14 +101,14 @@ function Interior() {
       ? `${t.ativos} ativo${t.ativos === 1 ? '' : 's'} em carteira · ${d.operacoes.length} operações registradas`
       : 'Carteira sem lançamentos',
     posicoes: 'Clique em um ativo para ver o histórico completo',
-    operacoes: `${d.operacoes.length} lançamento${d.operacoes.length === 1 ? '' : 's'} no livro`,
+    operacoes: `${d.operacoes.length} lançamento${d.operacoes.length === 1 ? '' : 's'} na carteira`,
     proventos: `${fmtBRL(d.proventos.reduce((s, p) => s + Number(p.valor), 0))} recebidos em ${d.proventos.length} crédito${d.proventos.length === 1 ? '' : 's'}`,
     alocacao: 'Defina o peso de cada classe e simule o próximo aporte',
     teto: 'Bazin, Graham e Gordon lado a lado, com margem de segurança',
     cotacoes: t.semCotacao
       ? `${t.semCotacao} de ${t.ativos} ativos ainda sem preço de mercado`
       : `Todos os ${t.ativos} ativos têm cotação registrada`,
-    b3: 'Relatórios da Área do Investidor em .xlsx ou .csv',
+    b3: 'Extratos da B3 em planilha, ou notas da Nomad em PDF',
     ajustes: d.carteira?.nome || '',
   }
 
@@ -96,7 +129,7 @@ function Interior() {
     proventos: <Proventos ir={ir} editando={editandoPv} setEditando={setEditandoPv} />,
     alocacao: <Alocacao />,
     teto: <PrecoTeto focoTicker={foco} limparFoco={() => setFoco(null)} />,
-    cotacoes: <Cotacoes />,
+    cotacoes: <Cotacoes ir={ir} />,
     b3: <Suspense fallback={<div className="carregando">Carregando o leitor de planilhas…</div>}><ImportarB3 ir={ir} /></Suspense>,
     ajustes: <Ajustes />,
   }[tela]
@@ -104,6 +137,9 @@ function Interior() {
   return (
     <div className="app">
       <aside className="lateral">
+        <div className="lateral-marca">
+          <img src="/logo-escuro.png" alt="gm Invest" />
+        </div>
         <div className="lateral-topo">
           <div className="rotulo">Carteira aberta</div>
           <button className="seletor" onClick={() => setSeletor(true)}>
@@ -127,6 +163,7 @@ function Interior() {
         </nav>
         <div className="lateral-pe">
           {d.carteira?.papel === 'leitura' && <div style={{ marginBottom: 6 }}>Acesso de leitura</div>}
+          <RelogioCotacoes d={d} />
           <button onClick={sair}>Sair da conta</button>
         </div>
       </aside>
@@ -167,7 +204,7 @@ function PrimeiraCarteira() {
   return (
     <div className="acesso"><div className="folha">
       <div className="marca">
-        <div className="selo">g</div>
+        <img src="/logo-claro.png" alt="gm Invest" className="marca-logo marca-logo-mini" />
         <h1>Primeira carteira</h1>
         <p>Entrou como {usuario?.email}. Agora crie a carteira que você vai acompanhar.</p>
       </div>
@@ -192,5 +229,21 @@ function PrimeiraCarteira() {
         </div>
       </div>
     </div></div>
+  )
+}
+
+/** Mostra quando as cotações foram buscadas pela última vez, com o estado da busca automática. */
+function RelogioCotacoes({ d }) {
+  if (d.statusAuto === 'buscando') return <div style={{ marginBottom: 6 }}>Buscando cotações…</div>
+  if (!d.ultimaAtualizacaoCotacoes) {
+    if (d.statusAuto === 'erro') return <div style={{ marginBottom: 6 }}>Cotações: sem retorno agora</div>
+    return null
+  }
+  const dt = new Date(d.ultimaAtualizacaoCotacoes)
+  const hoje = new Date().toDateString() === dt.toDateString()
+  return (
+    <div style={{ marginBottom: 6 }}>
+      Cotações {hoje ? 'hoje' : dt.toLocaleDateString('pt-BR')} às {fmtHora(d.ultimaAtualizacaoCotacoes)}
+    </div>
   )
 }

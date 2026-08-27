@@ -1,4 +1,5 @@
 import { paraNumero } from './formato'
+import { avaliar } from './teto'
 
 /**
  * Compara alocação alvo com a realizada e distribui um aporte.
@@ -67,4 +68,81 @@ export function distribuirAporte(linhas, totalAtual, aporte) {
 
   const gasto = destinos.reduce((s, d) => s + d.valor, 0)
   return { destinos, sobra: A - gasto, alcancaAlvo: somaFalta <= A + 1e-6 }
+}
+
+/**
+ * Distribui o alvo de um segmento (Bancos, Energia…) entre os ativos que
+ * pertencem a ele, proporcional ao peso atual de cada um dentro do
+ * segmento. Sem posição em nenhum ainda, divide igual. O resultado vira o
+ * ponto de partida do alvo por ativo — editável depois, um por um.
+ */
+export function cascatearSegmento(ativos, pctAlvoSegmento) {
+  if (!ativos.length) return []
+  const totalSegmento = ativos.reduce((s, a) => s + a.valorAtual, 0)
+  if (totalSegmento <= 0) {
+    const cada = pctAlvoSegmento / ativos.length
+    return ativos.map(a => ({ ticker: a.ticker, percentual: cada }))
+  }
+  return ativos.map(a => ({
+    ticker: a.ticker,
+    percentual: pctAlvoSegmento * (a.valorAtual / totalSegmento),
+  }))
+}
+
+/**
+ * Envolve distribuirAporte com a reserva de emergência na frente. Enquanto
+ * ela não estiver completa, uma fração do aporte é desviada para lá antes
+ * de qualquer coisa — nunca mais do que falta para completá-la. Sem meta
+ * definida, o comportamento é idêntico ao de sempre: tudo vai para a
+ * distribuição entre classes.
+ */
+export function distribuirAporteComReserva(linhas, totalAtual, aporte, reserva, pctReserva = 100) {
+  const A = paraNumero(aporte)
+  const meta = reserva ? paraNumero(reserva.meta) : 0
+  const atual = reserva ? paraNumero(reserva.atual) : 0
+  const falta = Math.max(0, meta - atual)
+
+  if (!reserva || meta <= 0 || falta <= 0) {
+    return {
+      reservaCompleta: true, faltaReserva: 0, paraReserva: 0, paraInvestir: A,
+      ...distribuirAporte(linhas, totalAtual, A),
+    }
+  }
+
+  const fracao = Math.max(0, Math.min(100, paraNumero(pctReserva))) / 100
+  const paraReserva = Math.min(A * fracao, falta)
+  const paraInvestir = A - paraReserva
+
+  return {
+    reservaCompleta: false, faltaReserva: falta - paraReserva, paraReserva, paraInvestir,
+    ...distribuirAporte(linhas, totalAtual, paraInvestir),
+  }
+}
+
+/**
+ * Ordena os ativos de uma classe por prioridade de compra, usando só o que
+ * você já declarou: o preço teto (Bazin, Graham, Gordon) e o alvo por
+ * ativo. Não é opinião sobre qual ativo é melhor — é aritmética sobre os
+ * critérios que você mesmo configurou, organizada para decidir mais rápido.
+ */
+export function melhoresAtivosDaClasse(ativos, premissas, alvosPorAtivo) {
+  const mapaAlvo = {}
+  alvosPorAtivo.forEach(a => { if (a.nivel === 'ativo') mapaAlvo[a.chave] = paraNumero(a.percentual) })
+
+  return ativos.map(p => {
+    const prem = premissas.find(x => x.ticker === p.ticker)
+    const av = avaliar(prem, p.precoAtual)
+    const alvoPct = mapaAlvo[p.ticker]
+    // positivo = está abaixo do próprio alvo individual, ou seja, merece aporte
+    const desvioAlvo = alvoPct != null ? alvoPct - p.fatia : null
+
+    let pontos = 0
+    if (av.desconto != null) pontos += Math.max(0, av.desconto) * 2
+    if (desvioAlvo != null) pontos += Math.max(0, desvioAlvo) * 3
+
+    return {
+      ticker: p.ticker, situacao: av.situacao, teto: av.teto, desconto: av.desconto,
+      alvoPct, desvioAlvo, pontos, temSinal: av.desconto != null || desvioAlvo != null,
+    }
+  }).sort((a, b) => b.pontos - a.pontos)
 }

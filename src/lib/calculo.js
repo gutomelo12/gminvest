@@ -1,22 +1,32 @@
-import { paraNumero } from './formato'
+import { paraNumero, CLASSES_SEM_COTACAO_ESPERADA, CLASSES_MOEDA_ESTRANGEIRA } from './formato'
 
 /**
- * Posições a partir do livro de operações.
+ * Posições a partir das operações da carteira.
  * Preço médio por custo: cada venda baixa o custo proporcional das cotas
  * vendidas e o que sobra da receita vira resultado realizado.
+ *
+ * Moeda: um ativo de "ETFs Intern." (ETF americano, por exemplo) é lançado e
+ * cotado em dólar — preço médio, cotação, custo e valor de cada LINHA
+ * ficam na moeda original, sem conversão, para bater com a nota de
+ * corretagem. A conversão para real só acontece nos TOTAIS (patrimônio,
+ * alocação por classe, % da carteira), que precisam de uma moeda comum
+ * para fazer sentido somados.
  */
-export function calcular(operacoes = [], proventos = [], cotacoes = {}) {
+export function calcular(operacoes = [], proventos = [], cotacoes = {}, classeDoAtivo = {}, taxasCambio = {}) {
   const ops = [...operacoes].sort((a, b) =>
     String(a.data).localeCompare(String(b.data)) || String(a.id).localeCompare(String(b.id)))
   const pos = {}
 
-  const abrir = (ticker, classe) => {
+  // a classe definida à mão vence qualquer dedução
+  const abrir = (ticker, classeDoLancamento) => {
+    const classe = classeDoAtivo[ticker] || classeDoLancamento
     if (!pos[ticker]) pos[ticker] = {
       ticker, classe: classe || 'Outro',
       qtd: 0, custo: 0, custoVendido: 0, realizado: 0, proventos: 0,
       taxas: 0, primeira: null, ultima: null, corretoras: new Set(),
     }
-    if (classe && classe !== 'Outro' && pos[ticker].classe === 'Outro') pos[ticker].classe = classe
+    if (classeDoAtivo[ticker]) pos[ticker].classe = classeDoAtivo[ticker]
+    else if (classe && classe !== 'Outro' && pos[ticker].classe === 'Outro') pos[ticker].classe = classe
     return pos[ticker]
   }
 
@@ -71,6 +81,15 @@ export function calcular(operacoes = [], proventos = [], cotacoes = {}) {
     const naoRealizado = p.qtd > 0 ? valorAtual - p.custo : 0
     const base = p.custo + p.custoVendido
     const retornoTotal = naoRealizado + p.realizado + p.proventos
+
+    // moeda nativa do ativo. Hoje só distingue BRL de USD — o suficiente
+    // para o caso real (ETFs americanos via Nomad), mas um ativo europeu
+    // em euro, por exemplo, ainda cairia aqui como se fosse dólar.
+    const moeda = CLASSES_MOEDA_ESTRANGEIRA.includes(p.classe) ? 'USD' : 'BRL'
+    const taxa = moeda === 'BRL' ? 1 : (taxasCambio[moeda] || null)
+    const temTaxa = taxa != null
+    const paraBRL = v => (temTaxa ? v * taxa : null)
+
     return {
       ...p,
       corretoras: [...p.corretoras],
@@ -83,32 +102,46 @@ export function calcular(operacoes = [], proventos = [], cotacoes = {}) {
       retornoPct: base > 0 ? retornoTotal / base * 100 : null,
       yieldCusto: base > 0 ? p.proventos / base * 100 : null,
       encerrada: p.qtd === 0,
+      // usado só para o aviso "sem cotação" — o preço de mercado em si
+      // (precoAtual acima) já cai para o preço médio de qualquer jeito
+      esperaCotacao: !CLASSES_SEM_COTACAO_ESPERADA.includes(p.classe),
+      // moeda nativa (para exibir a linha) e o equivalente em real (para
+      // somar nos totais). semTaxa avisa quando ainda não há câmbio buscado.
+      moeda, taxaCambio: taxa, temTaxa,
+      valorAtualBRL: paraBRL(valorAtual),
+      custoBRL: paraBRL(p.custo),
+      naoRealizadoBRL: paraBRL(naoRealizado),
+      realizadoBRL: paraBRL(p.realizado),
+      proventosBRL: paraBRL(p.proventos),
     }
   })
 
-  const abertas = lista.filter(p => p.qtd > 0).sort((a, b) => b.valorAtual - a.valorAtual)
-  const soma = (arr, f) => arr.reduce((s, x) => s + f(x), 0)
+  const abertas = lista.filter(p => p.qtd > 0).sort((a, b) => (b.valorAtualBRL ?? b.valorAtual) - (a.valorAtualBRL ?? a.valorAtual))
+  const soma = (arr, f) => arr.reduce((s, x) => s + (f(x) ?? 0), 0)
 
   const total = {
-    valor: soma(abertas, p => p.valorAtual),
-    custo: soma(abertas, p => p.custo),
-    naoRealizado: soma(abertas, p => p.naoRealizado),
-    realizado: soma(lista, p => p.realizado),
-    proventos: soma(lista, p => p.proventos),
+    valor: soma(abertas, p => p.valorAtualBRL),
+    custo: soma(abertas, p => p.custoBRL),
+    naoRealizado: soma(abertas, p => p.naoRealizadoBRL),
+    realizado: soma(lista, p => p.realizadoBRL),
+    proventos: soma(lista, p => p.proventosBRL),
     taxas: soma(lista, p => p.taxas),
     ativos: abertas.length,
-    semCotacao: abertas.filter(p => !p.temCotacao).length,
+    semCotacao: abertas.filter(p => !p.temCotacao && p.esperaCotacao).length,
+    semTaxaCambio: abertas.filter(p => !p.temTaxa).length,
   }
   total.naoRealizadoPct = total.custo > 0 ? total.naoRealizado / total.custo * 100 : null
   total.retorno = total.naoRealizado + total.realizado + total.proventos
+  total.retornoPct = total.custo > 0 ? total.retorno / total.custo * 100 : null
 
-  abertas.forEach(p => { p.fatia = total.valor > 0 ? p.valorAtual / total.valor * 100 : 0 })
+  abertas.forEach(p => { p.fatia = total.valor > 0 ? (p.valorAtualBRL ?? 0) / total.valor * 100 : 0 })
 
   const mapa = {}
   abertas.forEach(p => {
-    if (!mapa[p.classe]) mapa[p.classe] = { classe: p.classe, valor: 0, custo: 0, n: 0 }
-    mapa[p.classe].valor += p.valorAtual
-    mapa[p.classe].custo += p.custo
+    if (!mapa[p.classe]) mapa[p.classe] = { classe: p.classe, valor: 0, custo: 0, proventos: 0, n: 0 }
+    mapa[p.classe].valor += p.valorAtualBRL ?? 0
+    mapa[p.classe].custo += p.custoBRL ?? 0
+    mapa[p.classe].proventos += p.proventosBRL ?? 0
     mapa[p.classe].n++
   })
   const classes = Object.values(mapa).sort((a, b) => b.valor - a.valor)
@@ -132,6 +165,64 @@ export function proventosPorMes(proventos = [], meses = 12) {
   proventos.forEach(p => {
     const m = saida.find(x => x.ym === String(p.data).slice(0, 7))
     if (m) m.valor += paraNumero(p.valor)
+  })
+  return saida
+}
+
+/**
+ * Aportes por mês — soma das compras, sempre em real. Um ativo em dólar
+ * (ETFs Intern.) entra convertido pela taxa de câmbio atual; sem taxa
+ * cadastrada, fica de fora da soma daquele mês em vez de somar o número
+ * em dólar como se fosse real — o mesmo cuidado usado no resto do app.
+ * Bonificação, desdobro e ajuste não são aporte: não há dinheiro saindo
+ * do seu bolso nessas operações, só a venda teria efeito contrário.
+ */
+export function aportesPorMes(operacoes = [], taxasCambio = {}, classeDoAtivo = {}, meses = 12) {
+  const ref = new Date()
+  const saida = []
+  for (let i = meses - 1; i >= 0; i--) {
+    const d = new Date(ref.getFullYear(), ref.getMonth() - i, 1)
+    saida.push({
+      ym: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      rotulo: ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][d.getMonth()],
+      valor: 0,
+    })
+  }
+  operacoes.forEach(o => {
+    if (o.tipo !== 'compra') return
+    const m = saida.find(x => x.ym === String(o.data).slice(0, 7))
+    if (!m) return
+    const classe = classeDoAtivo[o.ticker] || o.classe
+    const nativo = Math.abs(paraNumero(o.quantidade)) * paraNumero(o.preco) + paraNumero(o.taxas)
+    if (!CLASSES_MOEDA_ESTRANGEIRA.includes(classe)) { m.valor += nativo; return }
+    const taxa = taxasCambio.USD
+    if (taxa) m.valor += nativo * taxa
+    // sem taxa de câmbio: este mês fica subcontado até você cadastrar uma,
+    // em vez de somar dólar como se fosse real
+  })
+  return saida
+}
+
+/**
+ * Uma fotografia por mês, dos últimos N — a mais recente registrada dentro
+ * de cada mês. Mês sem nenhuma fotografia fica com valor nulo (não zero):
+ * a carteira não deixou de valer algo, só não estava sendo acompanhada
+ * ainda. Espera `historico` ordenado por data crescente.
+ */
+export function patrimonioPorMes(historico = [], meses = 12) {
+  const ref = new Date()
+  const saida = []
+  for (let i = meses - 1; i >= 0; i--) {
+    const d = new Date(ref.getFullYear(), ref.getMonth() - i, 1)
+    saida.push({
+      ym: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      rotulo: ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][d.getMonth()],
+      valor: null, custo: null,
+    })
+  }
+  historico.forEach(h => {
+    const m = saida.find(x => x.ym === String(h.data).slice(0, 7))
+    if (m) { m.valor = paraNumero(h.valor); m.custo = paraNumero(h.custo) }
   })
   return saida
 }

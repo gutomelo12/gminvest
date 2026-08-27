@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useDados } from '../ctx/Dados'
-import { Painel, Vazio, Modal, Confirmacao, Barras, useRecibo } from '../comp/base'
-import { fmtBRL, fmtData, fmtPctSimples, hoje, paraNumero, corClasse, inferirClasse } from '../lib/formato'
+import { Painel, Vazio, Modal, Confirmacao, Barras, Colunas, useRecibo } from '../comp/base'
+import { fmtBRL, fmtData, fmtPctSimples, hoje, paraNumero, corClasse, inferirClasse, normalizarTicker } from '../lib/formato'
+import { proventosPorMes } from '../lib/calculo'
 
 export const TIPOS_PV = ['Dividendo', 'JCP', 'Rendimento', 'Amortização', 'Restituição', 'Juros', 'Outro']
 
@@ -16,7 +17,7 @@ export default function Proventos({ ir, editando, setEditando }) {
         <p>Nenhum provento registrado. O extrato de movimentação da B3 traz dividendos, JCP e
           rendimentos — importe-o e eles entram sozinhos.</p>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-          <button className="btn verde" onClick={() => ir('b3')}>Importar extrato</button>
+          <button className="btn verde" onClick={() => ir('b3')}>Importar extratos</button>
           {podeEscrever && <button className="btn vazio" onClick={() => setEditando({})}>Lançar à mão</button>}
         </div>
       </Vazio>
@@ -30,9 +31,15 @@ export default function Proventos({ ir, editando, setEditando }) {
     porAno[a] = (porAno[a] || 0) + paraNumero(p.valor)
   })
   const rank = Object.entries(porAtivo).map(([t, v]) => ({ t, v })).sort((a, b) => b.v - a.v)
+  const meses = proventosPorMes(proventos, 12)
+  const soma12 = meses.reduce((s, m) => s + m.valor, 0)
 
   return (
     <>
+      <Painel titulo="Proventos nos últimos 12 meses" aoLado={`${fmtBRL(soma12)} no período`}>
+        <Colunas dados={meses} formatar={fmtBRL} />
+      </Painel>
+
       <Painel titulo="De onde vêm os proventos" aoLado="acumulado por ativo">
         <div className="duas">
           <div>
@@ -51,25 +58,71 @@ export default function Proventos({ ir, editando, setEditando }) {
         </div>
       </Painel>
 
-      <Painel titulo="Extrato de proventos" aoLado={fmtBRL(total)} corpo={false}>
-        <div className="rolagem">
-          <table>
-            <thead><tr><th>Data</th><th>Ativo</th><th>Tipo</th><th>Valor</th><th /></tr></thead>
-            <tbody>{pvs.map(p => (
-              <tr key={p.id}>
-                <td className="n">{fmtData(p.data)}</td>
-                <td><span className="ticker">{p.ticker}</span></td>
-                <td>{p.tipo}</td>
-                <td className="n pos"><strong>{fmtBRL(p.valor)}</strong></td>
-                <td>{podeEscrever && <button className="btn mini vazio" onClick={() => setEditando(p)}>Editar</button>}</td>
-              </tr>
-            ))}</tbody>
-            <tfoot><tr><td>Total</td><td /><td /><td className="pos">{fmtBRL(total)}</td><td /></tr></tfoot>
-          </table>
-        </div>
-      </Painel>
+      <ExtratoProventos pvs={pvs} total={total} podeEscrever={podeEscrever} aoEditar={setEditando} />
+
       {editando && <FormProvento pv={editando} aoFechar={() => setEditando(null)} />}
     </>
+  )
+}
+
+/**
+ * O extrato inteiro pode ter centenas de linhas e empurrar tudo para baixo.
+ * Abre mostrando o ano corrente e as últimas linhas; o resto vem sob demanda.
+ */
+function ExtratoProventos({ pvs, total, podeEscrever, aoEditar }) {
+  const anos = [...new Set(pvs.map(p => String(p.data).slice(0, 4)))].sort().reverse()
+  const [ano, setAno] = useState(anos[0] || '')
+  const [tudo, setTudo] = useState(false)
+
+  const doAno = ano === 'todos' ? pvs : pvs.filter(p => String(p.data).startsWith(ano))
+  const somaAno = doAno.reduce((s, p) => s + paraNumero(p.valor), 0)
+  const LIMITE = 15
+  const visiveis = tudo ? doAno : doAno.slice(0, LIMITE)
+  const ocultos = doAno.length - visiveis.length
+
+  return (
+    <Painel corpo={false}>
+      <div className="painel-cab">
+        <h3>Extrato de proventos</h3>
+        <div className="filtros">
+          <select value={ano} onChange={e => { setAno(e.target.value); setTudo(false) }}>
+            {anos.map(a => <option key={a} value={a}>{a}</option>)}
+            <option value="todos">Todos os anos</option>
+          </select>
+          <span className="rotulo">{doAno.length} crédito{doAno.length === 1 ? '' : 's'} · {fmtBRL(somaAno)}</span>
+        </div>
+      </div>
+      <div className="rolagem">
+        <table>
+          <thead><tr><th>Data</th><th>Ativo</th><th>Tipo</th><th>Valor</th><th /></tr></thead>
+          <tbody>{visiveis.map(p => (
+            <tr key={p.id}>
+              <td className="n">{fmtData(p.data)}</td>
+              <td><span className="ticker">{p.ticker}</span></td>
+              <td>{p.tipo}</td>
+              <td className="n pos"><strong>{fmtBRL(p.valor)}</strong></td>
+              <td>{podeEscrever && <button className="btn mini vazio" onClick={() => aoEditar(p)}>Editar</button>}</td>
+            </tr>
+          ))}</tbody>
+          <tfoot><tr>
+            <td>{ano === 'todos' ? 'Total geral' : `Total de ${ano}`}</td><td /><td />
+            <td className="pos">{fmtBRL(somaAno)}</td><td />
+          </tr></tfoot>
+        </table>
+      </div>
+      {ocultos > 0 && (
+        <div style={{ padding: '12px 16px', textAlign: 'center', borderTop: '1px solid var(--linha-2)' }}>
+          <button className="btn vazio mini" onClick={() => setTudo(true)}>
+            Mostrar os outros {ocultos} crédito{ocultos === 1 ? '' : 's'}
+          </button>
+        </div>
+      )}
+      {tudo && doAno.length > LIMITE && (
+        <div style={{ padding: '12px 16px', textAlign: 'center', borderTop: '1px solid var(--linha-2)' }}>
+          <button className="btn vazio mini" onClick={() => setTudo(false)}>Recolher</button>
+        </div>
+      )}
+    </Painel>
   )
 }
 
@@ -109,7 +162,7 @@ export function FormProvento({ pv, aoFechar }) {
             <input type="date" value={v.data} max={hoje()} onChange={e => setV({ ...v, data: e.target.value })} /></label>
           <label className="campo"><span className="rotulo">Ativo</span>
             <input value={v.ticker} placeholder="MXRF11" style={{ textTransform: 'uppercase' }}
-              onChange={e => setV({ ...v, ticker: e.target.value.toUpperCase().replace(/\s/g, '') })} /></label>
+              onChange={e => setV({ ...v, ticker: normalizarTicker(e.target.value) })} /></label>
         </div>
         <div className="grade">
           <label className="campo"><span className="rotulo">Tipo</span>

@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx'
-import { paraNumero, paraISO, semAcento, inferirClasse } from './formato'
+import { paraNumero, paraISO, semAcento, inferirClasse, normalizarTicker } from './formato'
 
 /**
  * Leitura dos relatórios da Área do Investidor da B3.
@@ -50,7 +50,10 @@ export function lerPlanilha(buf) {
 
 export function limparTicker(v) {
   let s = String(v || '').trim().toUpperCase().split(' - ')[0].trim().replace(/\s+/g, ' ')
-  if (/^[A-Z0-9]{4,7}$/.test(s.replace(/\s/g, ''))) return s.replace(/\s/g, '')
+  if (/^[A-Z0-9]{4,7}$/.test(s.replace(/\s/g, ''))) {
+    // o fracionário entra na carteira junto com o lote padrão
+    return normalizarTicker(s.replace(/\s/g, ''))
+  }
   return s.slice(0, 40)
 }
 
@@ -59,7 +62,7 @@ function traduzir(mov, entSai, qtd, precoU, valor, produto, data, inst) {
   const credito = semAcento(entSai).startsWith('credito')
   const ticker = limparTicker(produto)
   const classe = inferirClasse(ticker, produto)
-  const base = { data, ticker, classe, corretora: inst, origem: mov }
+  const base = { data, ticker, classe, corretora: inst, origem: mov, fonte: 'movimentacao' }
 
   if (m.includes('juros sobre capital')) return { destino: 'provento', ...base, tipo: 'JCP', valor }
   if (m.includes('dividendo'))           return { destino: 'provento', ...base, tipo: 'Dividendo', valor }
@@ -70,10 +73,13 @@ function traduzir(mov, entSai, qtd, precoU, valor, produto, data, inst) {
 
   const pu = () => precoU > 0 ? precoU : (qtd > 0 ? valor / qtd : 0)
 
+  // Estas linhas são a liquidação de negócios que o relatório de Negociação
+  // já traz — mesma operação, vista dois dias depois. Ficam marcadas para
+  // não entrarem junto e dobrarem a carteira.
   if (m.includes('liquidacao') || m.includes('compra / venda') || m.includes('compra/venda'))
-    return { destino: 'operacao', ...base, tipo: credito ? 'compra' : 'venda', quantidade: qtd, preco: pu(), taxas: 0 }
+    return { destino: 'operacao', liquidacao: true, ...base, tipo: credito ? 'compra' : 'venda', quantidade: qtd, preco: pu(), taxas: 0 }
   if (m === 'compra' || m === 'venda' || m.startsWith('compra ') || m.startsWith('venda '))
-    return { destino: 'operacao', ...base, tipo: m.startsWith('venda') ? 'venda' : 'compra', quantidade: qtd, preco: pu(), taxas: 0 }
+    return { destino: 'operacao', liquidacao: true, ...base, tipo: m.startsWith('venda') ? 'venda' : 'compra', quantidade: qtd, preco: pu(), taxas: 0 }
   if (m.includes('resgate'))
     return { destino: 'operacao', ...base, tipo: 'venda', quantidade: qtd, preco: pu(), taxas: 0 }
   if (m.includes('bonificacao'))
@@ -110,7 +116,7 @@ export function extrair(blocos) {
           preco: paraNumero(l[cP]),
           taxas: 0,
           corretora: cI >= 0 ? String(l[cI] || '').trim() : '',
-          origem: 'Negociação',
+          origem: 'Negociação', fonte: 'negociacao',
         })
       })
     } else if (b.tipo === 'movimentacao') {
@@ -121,7 +127,7 @@ export function extrair(blocos) {
         const x = traduzir(String(l[cM] || ''), String(l[cE] || ''),
           paraNumero(l[cQ]), paraNumero(l[cPU]), paraNumero(l[cV]),
           String(l[cPr] || ''), data, cI >= 0 ? String(l[cI] || '').trim() : '')
-        if (x.ticker) itens.push(x)
+        if (x.ticker) itens.push({ ...x, fonte: 'movimentacao' })
       })
     } else if (b.tipo === 'posicao') {
       const cC = i(COL.codNeg), cPr = i(COL.produto), cQ = i(COL.qtd),
@@ -131,13 +137,32 @@ export function extrair(blocos) {
         const q = paraNumero(l[cQ])
         let preco = cF >= 0 ? paraNumero(l[cF]) : 0
         if (!preco && cVA >= 0 && q > 0) preco = paraNumero(l[cVA]) / q
-        if (preco > 0) precos[ticker] = {
+        if (preco > 0 || q > 0) precos[ticker] = {
           preco, quantidade: q, classe: inferirClasse(ticker, String(l[cPr] || '')), aba: b.aba,
         }
       })
     }
   })
   itens.sort((a, b) => a.data.localeCompare(b.data))
-  itens.forEach((x, n) => { x._i = n; if (x.destino !== 'ignorado') x._d = digital(x) })
+
+  /**
+   * A B3 quebra uma ordem em várias linhas quando ela executa em partes:
+   * vender 300 cotas pode sair como três execuções idênticas de 100. Sem um
+   * contador, as três teriam a mesma impressão digital e o banco recusaria
+   * duas como repetição — e a venda entraria pela terça parte.
+   *
+   * A primeira ocorrência fica sem sufixo de propósito: assim, reimportar um
+   * arquivo já processado reconhece o que está gravado e acrescenta só o que
+   * faltou, em vez de duplicar tudo.
+   */
+  const vezes = new Map()
+  itens.forEach((x, n) => {
+    x._i = n
+    if (x.destino === 'ignorado') return
+    const base = digital(x)
+    const k = (vezes.get(base) || 0) + 1
+    vezes.set(base, k)
+    x._d = k === 1 ? base : `${base}#${k}`
+  })
   return { itens, precos }
 }

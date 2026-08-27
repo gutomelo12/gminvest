@@ -258,3 +258,269 @@ begin
                       with check (public.pode_escrever(carteira_id))$f$, t);
   end loop;
 end $$;
+
+-- ------------------------------------------------------------
+--  Origem das premissas de preço teto
+--  Marca o que veio de busca automática, para que a próxima busca
+--  não sobrescreva número conferido à mão no balanço.
+-- ------------------------------------------------------------
+alter table public.premissas_teto
+  add column if not exists origem text not null default 'manual';
+
+-- ------------------------------------------------------------
+--  Origem do lançamento
+--  Distingue o que veio do relatório de Negociação do que veio da
+--  Movimentação, para localizar duplicatas entre os dois.
+-- ------------------------------------------------------------
+alter table public.operacoes
+  add column if not exists fonte text;
+
+-- ------------------------------------------------------------
+--  Classificação por ativo
+--  A classe deixa de viver em cada operação e passa a ser uma
+--  decisão sua, por papel. O que você definir aqui vence qualquer
+--  dedução automática, sempre.
+-- ------------------------------------------------------------
+create table if not exists public.classificacao (
+  carteira_id uuid not null references public.carteiras(id) on delete cascade,
+  ticker      text not null,
+  classe      text not null,
+  atualizado  timestamptz not null default now(),
+  primary key (carteira_id, ticker)
+);
+
+alter table public.classificacao enable row level security;
+
+drop policy if exists p_classificacao_ler on public.classificacao;
+create policy p_classificacao_ler on public.classificacao
+  for select using (public.pode_ler(carteira_id));
+
+drop policy if exists p_classificacao_escrever on public.classificacao;
+create policy p_classificacao_escrever on public.classificacao
+  for all using (public.pode_escrever(carteira_id))
+  with check (public.pode_escrever(carteira_id));
+
+-- ------------------------------------------------------------
+--  Histórico de patrimônio
+--  Uma fotografia por dia do valor de mercado e do custo. Alimenta o
+--  gráfico "Evolução do Patrimônio". Não existe preço histórico dos
+--  ativos disponível de graça — por isso o histórico só começa a se
+--  formar a partir do dia em que a carteira é aberta com esta versão
+--  do app, e cresce um ponto por dia daí em diante.
+-- ------------------------------------------------------------
+create table if not exists public.patrimonio_historico (
+  carteira_id uuid not null references public.carteiras(id) on delete cascade,
+  data        date not null,
+  valor       numeric(20,2) not null,
+  custo       numeric(20,2) not null,
+  criado_em   timestamptz not null default now(),
+  primary key (carteira_id, data)
+);
+
+alter table public.patrimonio_historico enable row level security;
+
+drop policy if exists p_patrimonio_historico_ler on public.patrimonio_historico;
+create policy p_patrimonio_historico_ler on public.patrimonio_historico
+  for select using (public.pode_ler(carteira_id));
+
+drop policy if exists p_patrimonio_historico_escrever on public.patrimonio_historico;
+create policy p_patrimonio_historico_escrever on public.patrimonio_historico
+  for all using (public.pode_escrever(carteira_id))
+  with check (public.pode_escrever(carteira_id));
+
+-- ------------------------------------------------------------
+--  Administradores
+--  Quem pode convidar gente nova para o gminvest. Gerenciado só por SQL
+--  direto no Supabase — não existe tela para isso, de propósito: é uma
+--  ação rara e sensível o bastante para não precisar de interface.
+--
+--  Depois de rodar este arquivo, torne a SUA PRÓPRIA conta administradora
+--  (troque o e-mail e rode uma vez só):
+--
+--    insert into public.administradores (usuario_id)
+--    select id from auth.users where email = 'seuemail@exemplo.com'
+--    on conflict do nothing;
+-- ------------------------------------------------------------
+create table if not exists public.administradores (
+  usuario_id uuid primary key references auth.users(id) on delete cascade,
+  criado_em  timestamptz not null default now()
+);
+
+alter table public.administradores enable row level security;
+
+drop policy if exists p_admin_le_a_si_mesmo on public.administradores;
+create policy p_admin_le_a_si_mesmo on public.administradores
+  for select using (usuario_id = auth.uid());
+-- sem policy de insert/update/delete: só dá para mexer nesta tabela pelo
+-- SQL Editor (ou pela service_role, usada só dentro da função de convite)
+
+-- ------------------------------------------------------------
+--  Cadastro fechado por convite
+--  Ninguém cria conta sozinho, e o convite não empresta acesso a nenhuma
+--  carteira sua — é uma conta nova e independente, do zero. Quem convida
+--  (um administrador) manda um e-mail de verdade, com um link que deixa
+--  a pessoa definir a própria senha; ao entrar pela primeira vez, ela cai
+--  direto na tela de "criar minha primeira carteira", sem vínculo com
+--  ninguém.
+--
+--  O gate é imposto no próprio banco (gatilho em auth.users), não só na
+--  tela — chamar a API de cadastro por fora do app também é barrado.
+--  Continua aceitando também quem foi convidado para compartilhar uma
+--  carteira específica (a tabela "convites" de sempre), sem mudar aquele
+--  fluxo.
+-- ------------------------------------------------------------
+create table if not exists public.convites_cadastro (
+  email         text primary key,
+  usuario_id    uuid references auth.users(id) on delete set null,
+  convidado_por uuid references auth.users(id),
+  criado_em     timestamptz not null default now(),
+  usado_em      timestamptz
+);
+
+alter table public.convites_cadastro enable row level security;
+
+-- ninguém escreve por aqui com a chave anon — só a função de convite,
+-- com a service_role. A leitura é liberada só para administradores, para
+-- alimentar o painel "Convites enviados".
+drop policy if exists p_convites_cadastro_admin_le on public.convites_cadastro;
+create policy p_convites_cadastro_admin_le on public.convites_cadastro
+  for select using (exists (select 1 from public.administradores where usuario_id = auth.uid()));
+
+-- a própria pessoa convidada marca o convite como concluído, no momento
+-- em que define a senha — nunca antes disso, então "usado_em" preenchido
+-- significa mesmo que ela terminou de entrar, não só que clicou no link.
+create or replace function public.marcar_convite_usado()
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  update public.convites_cadastro
+  set usado_em = now()
+  where lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    and usado_em is null;
+end $$;
+
+create or replace function public.verificar_convite_cadastro()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.convites where lower(email) = lower(new.email))
+     and not exists (select 1 from public.convites_cadastro where lower(email) = lower(new.email)) then
+    raise exception 'Cadastro fechado: peça um convite a quem administra o gminvest.';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_verificar_convite on auth.users;
+create trigger trg_verificar_convite before insert on auth.users
+  for each row execute function public.verificar_convite_cadastro();
+
+-- ------------------------------------------------------------
+--  Segmento — uma camada entre classe e ativo
+--  BBAS3 e BRBI11 são Ação, mas um é Banco, o outro Serviços
+--  Financeiros. Definir o alvo por segmento (Bancos, Energia,
+--  Shoppings...) e deixar o app distribuir para os ativos daquele
+--  segmento é mais natural do que digitar o percentual ativo a ativo.
+-- ------------------------------------------------------------
+create table if not exists public.segmentos (
+  carteira_id uuid not null references public.carteiras(id) on delete cascade,
+  ticker      text not null,
+  segmento    text not null,
+  atualizado  timestamptz not null default now(),
+  primary key (carteira_id, ticker)
+);
+
+alter table public.segmentos enable row level security;
+
+drop policy if exists p_segmentos_ler on public.segmentos;
+create policy p_segmentos_ler on public.segmentos
+  for select using (public.pode_ler(carteira_id));
+
+drop policy if exists p_segmentos_escrever on public.segmentos;
+create policy p_segmentos_escrever on public.segmentos
+  for all using (public.pode_escrever(carteira_id))
+  with check (public.pode_escrever(carteira_id));
+
+-- a alocação alvo passa a aceitar um terceiro nível, além de classe e ativo
+alter table public.alocacao_alvo drop constraint if exists alocacao_alvo_nivel_check;
+alter table public.alocacao_alvo add constraint alocacao_alvo_nivel_check
+  check (nivel in ('classe','segmento','ativo'));
+
+-- ------------------------------------------------------------
+--  Reserva de emergência
+--  Não é posição de carteira — é dinheiro de liquidez diária, fora da
+--  bolsa. O app só guarda a meta e o valor atual, que a pessoa mesma
+--  atualiza; não há como ler o saldo de uma caixinha de banco daqui.
+-- ------------------------------------------------------------
+create table if not exists public.reserva_emergencia (
+  carteira_id uuid primary key references public.carteiras(id) on delete cascade,
+  meta        numeric(20,2) not null default 0,
+  atual       numeric(20,2) not null default 0,
+  atualizado  timestamptz not null default now()
+);
+
+alter table public.reserva_emergencia enable row level security;
+
+drop policy if exists p_reserva_ler on public.reserva_emergencia;
+create policy p_reserva_ler on public.reserva_emergencia
+  for select using (public.pode_ler(carteira_id));
+
+drop policy if exists p_reserva_escrever on public.reserva_emergencia;
+create policy p_reserva_escrever on public.reserva_emergencia
+  for all using (public.pode_escrever(carteira_id))
+  with check (public.pode_escrever(carteira_id));
+
+-- ------------------------------------------------------------
+--  Detalhes de Renda Fixa
+--  CDB, LCI, LCA e afins não têm código de bolsa, então a operação
+--  ganha um ticker sintético (emissor + vencimento). Os campos que só
+--  fazem sentido para renda fixa — indexador, taxa, vencimento,
+--  liquidez diária — ficam numa tabela à parte, não na tabela geral
+--  de operações, que serviria de nada para ação ou FII.
+-- ------------------------------------------------------------
+create table if not exists public.detalhes_renda_fixa (
+  operacao_id     uuid primary key references public.operacoes(id) on delete cascade,
+  emissor         text,
+  subtipo         text,      -- CDB, LCI, LCA, CRI, CRA, Debênture, Letra Financeira...
+  indexador       text,      -- CDI, IPCA, Selic, Prefixado
+  taxa            numeric(9,4),  -- percentual contratado: 110 (110% do CDI) ou 6.5 (IPCA + 6,5%)
+  forma           text,      -- Pós-fixado, Prefixado, Híbrido
+  liquidez_diaria boolean not null default false,
+  vencimento      date
+);
+
+alter table public.detalhes_renda_fixa enable row level security;
+
+drop policy if exists p_detalhes_rf_ler on public.detalhes_renda_fixa;
+create policy p_detalhes_rf_ler on public.detalhes_renda_fixa for select using (
+  exists (select 1 from public.operacoes o where o.id = operacao_id and public.pode_ler(o.carteira_id))
+);
+
+drop policy if exists p_detalhes_rf_escrever on public.detalhes_renda_fixa;
+create policy p_detalhes_rf_escrever on public.detalhes_renda_fixa for all using (
+  exists (select 1 from public.operacoes o where o.id = operacao_id and public.pode_escrever(o.carteira_id))
+) with check (
+  exists (select 1 from public.operacoes o where o.id = operacao_id and public.pode_escrever(o.carteira_id))
+);
+
+-- ------------------------------------------------------------
+--  Cores por classe
+--  De fábrica, cada classe tem uma cor fixa no código. Aqui a pessoa
+--  pode trocar — vale para o gráfico de "Ativos na carteira" e para os
+--  indicadores coloridos de classe em outras telas.
+-- ------------------------------------------------------------
+create table if not exists public.cores_classe (
+  carteira_id uuid not null references public.carteiras(id) on delete cascade,
+  classe      text not null,
+  cor         text not null,
+  atualizado  timestamptz not null default now(),
+  primary key (carteira_id, classe)
+);
+
+alter table public.cores_classe enable row level security;
+
+drop policy if exists p_cores_classe_ler on public.cores_classe;
+create policy p_cores_classe_ler on public.cores_classe
+  for select using (public.pode_ler(carteira_id));
+
+drop policy if exists p_cores_classe_escrever on public.cores_classe;
+create policy p_cores_classe_escrever on public.cores_classe
+  for all using (public.pode_escrever(carteira_id))
+  with check (public.pode_escrever(carteira_id));

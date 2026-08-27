@@ -1,7 +1,8 @@
 /* ============================================================
-   Custódia — sistema visual
+   gminvest — sistema visual
    Paleta derivada das cédulas do Real: substrato de papel-moeda,
-   tinta calcográfica, verde de valor.
+   tinta calcográfica, verde de valor, com um fio de ouro reservado
+   para o único gesto de destaque — o selo e o número que importa.
    ============================================================ */
 :root{
   --cedula:#E4E7DE; --cedula-2:#F3F5EF; --cedula-3:#FAFBF7;
@@ -11,11 +12,14 @@
   --azul:#1C3F94; --azul-claro:#E2E7F3;
   --ambar:#B87615; --ambar-claro:#F5EBD8;
   --vermelho:#9E2B2B; --verm-claro:#F3E2E2;
-  --serif:'Iowan Old Style','Palatino Linotype','Book Antiqua',Palatino,'Times New Roman',serif;
-  --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
-  --mono:ui-monospace,'SF Mono','Cascadia Mono','Roboto Mono',Menlo,Consolas,monospace;
+  --ouro:#B08A3E; --ouro-claro:#F1E7D2; --ouro-escuro:#8A6A28;
+  --serif:'Fraunces','Iowan Old Style','Palatino Linotype','Book Antiqua',Palatino,'Times New Roman',serif;
+  --sans:'IBM Plex Sans',ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,'SF Mono','Cascadia Mono','Roboto Mono',Menlo,Consolas,monospace;
   --r:3px;
+  --ease:cubic-bezier(.2,.7,.3,1);
   --sombra:0 1px 0 rgba(16,30,25,.04), 0 8px 24px -18px rgba(16,30,25,.35);
+  --sombra-suave:0 10px 24px -18px rgba(16,30,25,.28);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body,#root{height:100%}
@@ -36,9 +40,9 @@ code{font-family:var(--mono);font-size:.9em;background:var(--cedula-2);padding:1
   background:radial-gradient(1100px 620px at 50% -10%,#EFF1EA 0%,var(--cedula) 60%)}
 .folha{width:100%;max-width:520px}
 .marca{text-align:center;margin-bottom:26px}
-.marca .selo{display:inline-grid;place-items:center;width:44px;height:44px;border:1.5px solid var(--verde);
-  border-radius:50%;font-family:var(--serif);font-size:20px;font-weight:600;color:var(--verde);margin-bottom:12px}
-.marca h1{font-family:var(--serif);font-size:32px;font-weight:600;letter-spacing:-.015em}
+.marca-logo{max-width:min(100%,340px);height:auto;margin-bottom:6px}
+.marca-logo-mini{max-width:220px}
+.marca h1{font-family:var(--serif);font-size:22px;font-weight:600;letter-spacing:-.01em;margin-top:14px}
 .marca p{font-size:12.5px;color:var(--tinta-3);margin-top:4px}
 .cedula{position:relative;background:var(--cedula-3);border:1px solid var(--linha);border-radius:var(--r);
   box-shadow:var(--sombra);overflow:hidden}
@@ -57,16 +61,19 @@ code{font-family:var(--mono);font-size:.9em;background:var(--cedula-2);padding:1
 
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 16px;
   background:var(--tinta);color:var(--cedula-3);border:1px solid var(--tinta);border-radius:var(--r);
-  font-weight:600;font-size:13px;cursor:pointer;transition:opacity .14s}
-.btn:hover{opacity:.86}
-.btn:disabled{opacity:.4;cursor:not-allowed}
+  font-weight:600;font-size:13px;cursor:pointer;
+  transition:opacity .14s var(--ease),transform .14s var(--ease),box-shadow .14s var(--ease)}
+.btn:hover{opacity:.86;transform:translateY(-1px);box-shadow:var(--sombra-suave)}
+.btn:active{transform:translateY(0);box-shadow:none;transition-duration:.05s}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
 .btn.cheio{width:100%;padding:11px}
 .btn.verde{background:var(--verde);border-color:var(--verde)}
-.btn.vazio{background:transparent;color:var(--tinta);border-color:var(--linha)}
-.btn.vazio:hover{border-color:var(--tinta);opacity:1}
-.btn.perigo{background:transparent;color:var(--vermelho);border-color:var(--verm-claro)}
-.btn.perigo:hover{background:var(--verm-claro);opacity:1}
+.btn.vazio{background:transparent;color:var(--tinta);border-color:var(--linha);box-shadow:none}
+.btn.vazio:hover{border-color:var(--tinta);opacity:1;box-shadow:var(--sombra-suave)}
+.btn.perigo{background:transparent;color:var(--vermelho);border-color:var(--verm-claro);box-shadow:none}
+.btn.perigo:hover{background:var(--verm-claro);opacity:1;box-shadow:none;transform:none}
 .btn.mini{padding:5px 10px;font-size:11.5px}
+.btn.mini:hover{transform:none;box-shadow:none}
 
 .aviso{padding:11px 13px;border-radius:var(--r);font-size:12.5px;line-height:1.55;border:1px solid}
 .aviso.erro{background:var(--verm-claro);border-color:#E4C4C4;color:#7A2020}
@@ -79,6 +86,8 @@ code{font-family:var(--mono);font-size:.9em;background:var(--cedula-2);padding:1
 .app{display:grid;grid-template-columns:224px 1fr;min-height:100%}
 .lateral{background:var(--tinta);color:var(--cedula-2);padding:20px 0;display:flex;flex-direction:column;
   position:sticky;top:0;height:100vh}
+.lateral-marca{padding:0 18px 18px}
+.lateral-marca img{max-width:100%;height:auto;display:block}
 .lateral-topo{padding:0 16px 16px;border-bottom:1px solid rgba(255,255,255,.09)}
 .lateral-topo .rotulo{color:rgba(244,245,240,.42)}
 .seletor{display:flex;align-items:center;gap:9px;width:100%;margin-top:9px;padding:7px 8px;
@@ -102,33 +111,50 @@ nav button.ativo{background:rgba(255,255,255,.1);color:#fff;font-weight:600;box-
 .lateral-pe button:hover{color:#fff}
 
 main{min-width:0;padding-bottom:60px}
-.cabecalho{position:relative;padding:26px 34px 22px;border-bottom:1px solid var(--linha);
-  background:var(--cedula-3);overflow:hidden}
+.cabecalho{position:relative;padding:26px 34px 22px;background:var(--cedula);overflow:hidden}
 .cabecalho-corpo{position:relative;display:flex;flex-wrap:wrap;gap:20px;align-items:flex-end;justify-content:space-between}
 .cabecalho h2{font-family:var(--serif);font-size:24px;font-weight:600}
 .cabecalho .sub{font-size:12.5px;color:var(--tinta-3);margin-top:2px}
 .acoes-cab{display:flex;gap:8px;flex-wrap:wrap}
 .conteudo{padding:26px 34px}
 
-.patrimonio{display:flex;flex-wrap:wrap;align-items:flex-end;gap:30px 44px;margin-bottom:24px}
-.patrimonio .valor{font-family:var(--serif);font-size:clamp(34px,5.4vw,52px);font-weight:600;line-height:1;
-  letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.patrimonio .valor .cent{font-size:.52em;color:var(--tinta-3)}
-.patrimonio .valor .moeda{font-size:.4em;color:var(--tinta-3);margin-right:.14em;font-weight:400}
-.patrimonio .lado{display:flex;gap:34px;flex-wrap:wrap;padding-bottom:6px}
-.patrimonio .lado .v{font-family:var(--mono);font-size:16px;font-variant-numeric:tabular-nums;margin-top:3px}
+/* linha de resumo: quatro cartões padronizados, sempre em uma única
+   fileira no desktop — mesma estrutura, mesmo peso visual */
+.linha-resumo{display:grid;grid-template-columns:repeat(4,minmax(200px,1fr));
+  gap:12px;margin-bottom:24px}
 
 .cartoes{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));margin-bottom:24px}
-.cartao{background:var(--cedula-3);border:1px solid var(--linha-2);border-radius:var(--r);padding:15px 16px}
+.cartao{background:var(--cedula-3);border:1px solid var(--linha-2);border-radius:var(--r);padding:15px 16px;
+  transition:transform .18s var(--ease),box-shadow .18s var(--ease),border-color .18s var(--ease)}
+.cartao:hover{transform:translateY(-2px);box-shadow:var(--sombra-suave);border-color:var(--linha)}
 .cartao .v{font-family:var(--mono);font-size:19px;font-variant-numeric:tabular-nums;margin-top:7px;letter-spacing:-.02em}
 .cartao .p{font-size:11.5px;color:var(--tinta-3);margin-top:3px;font-family:var(--mono)}
 
+/* o cartão do patrimônio é o primeiro entre iguais: número maior, em
+   Fraunces, com a régua dourada e a pílula de rentabilidade coladas nele */
+.cartao.destaque{padding:18px 20px}
+.destaque-cab{display:flex;align-items:center;gap:10px}
+.selo-mini{flex:0 0 auto;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;
+  background:var(--verde-claro);border:1px solid var(--verde);color:var(--verde);
+  font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:-.02em}
+.cartao.destaque .valor{font-family:var(--serif);font-size:clamp(26px,2.6vw,34px);font-weight:600;line-height:1;
+  letter-spacing:-.015em;font-variant-numeric:oldstyle-nums;font-optical-sizing:auto}
+.cartao.destaque .valor .cent{font-size:.55em;color:var(--tinta-3)}
+.cartao.destaque .valor .moeda{font-size:.42em;color:var(--tinta-3);margin-right:.12em;font-weight:400}
+.cartao.destaque .sub{margin-top:10px;font-size:12px}
+.cartao.destaque .sub+.sub{margin-top:1px}
+
 .painel{background:var(--cedula-3);border:1px solid var(--linha-2);border-radius:var(--r);margin-bottom:20px;overflow:hidden}
 .painel-cab{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 16px;
-  border-bottom:1px solid var(--linha-2);background:var(--cedula-2);flex-wrap:wrap}
+  background:var(--cedula);flex-wrap:wrap}
 .painel-cab h3{font-size:13px;font-weight:700}
 .painel-corpo{padding:16px}
 .duas{display:grid;gap:20px;grid-template-columns:minmax(0,340px) minmax(0,1fr);align-items:start}
+.duas-largas{display:grid;gap:20px;grid-template-columns:1fr 1fr}
+/* as duas colunas esticam pra mesma altura; o conteúdo mais curto centra
+   no espaço sobrando, em vez de deixar um vazio colado embaixo */
+.duas-largas > .painel{display:flex;flex-direction:column}
+.duas-largas > .painel > .painel-corpo{flex:1;display:flex;flex-direction:column;justify-content:center}
 
 .rolagem{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -152,6 +178,11 @@ td input.celula{width:104px;text-align:right;font-family:var(--mono);padding:5px
 
 .tag{display:inline-block;padding:1.5px 7px;border-radius:20px;font-family:var(--mono);font-size:9.5px;
   letter-spacing:.1em;text-transform:uppercase;border:1px solid}
+.pilula{display:inline-flex;align-items:center;gap:3px;padding:3px 9px;border-radius:20px;
+  font-family:var(--mono);font-size:12px;font-weight:600}
+.pilula.pos{background:var(--verde-claro);color:#0A5B41}
+.pilula.neg{background:var(--verm-claro);color:#7A2020}
+.pilula.nulo{background:var(--cedula-2);color:var(--tinta-3)}
 .vazio-estado{padding:44px 20px;text-align:center;color:var(--tinta-3)}
 .vazio-estado p{font-size:13px;margin-bottom:14px;max-width:440px;margin-inline:auto;line-height:1.6}
 
@@ -159,7 +190,7 @@ td input.celula{width:104px;text-align:right;font-family:var(--mono);padding:5px
 .barra-item .cab{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px;font-size:12.5px}
 .barra-item .cab .v{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--tinta-2)}
 .trilho{height:7px;background:var(--linha-2);border-radius:20px;overflow:hidden;position:relative}
-.trilho i{display:block;height:100%;border-radius:20px;transition:width .5s cubic-bezier(.2,.7,.3,1)}
+.trilho i{display:block;height:100%;border-radius:20px;transition:width .5s var(--ease)}
 .trilho .marcador{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--tinta);opacity:.75}
 
 .cortina{position:fixed;inset:0;z-index:60;background:rgba(16,30,25,.42);display:grid;place-items:center;
@@ -206,5 +237,30 @@ td input.celula{width:104px;text-align:right;font-family:var(--mono);padding:5px
   nav button{white-space:nowrap}
   .cabecalho,.conteudo{padding-inline:18px}
   .duas{grid-template-columns:1fr}
+  .duas-largas{grid-template-columns:1fr}
+  .linha-resumo{grid-template-columns:1fr}
 }
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* seções por classe em "Meus Ativos" — cada classe é seu próprio bloco
+   com bordas e cabeçalho independentes, não uma linha dentro de uma
+   tabela contínua. O espaço entre blocos é o que separa uma seção da
+   outra visualmente, em vez de tudo ler como uma coisa só. */
+.secoes-grupo{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.secao-grupo{border:1px solid var(--linha-2);border-radius:var(--r);overflow:hidden;background:var(--cedula-3)}
+.secao-grupo-cab{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  padding:12px 14px;background:var(--cedula-3);cursor:pointer;transition:background .14s var(--ease)}
+.secao-grupo-cab:hover{background:var(--linha-2)}
+.secao-grupo-titulo{display:flex;align-items:center;font-size:13.5px}
+.secao-grupo-titulo .risco{display:inline-block;width:3px;height:14px;border-radius:2px;margin-right:9px}
+.secao-grupo-titulo .conta{color:var(--tinta-3);font-weight:400;margin-left:8px;font-size:11.5px}
+.secao-grupo-metricas{display:flex;gap:22px;flex-wrap:wrap}
+.secao-grupo-metricas .item{text-align:right}
+.secao-grupo-metricas .rotulo{display:block;margin-bottom:2px}
+.secao-grupo-metricas .num{font-size:13px}
+.secao-grupo-total{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  padding:12px 14px;border:1px solid var(--tinta);border-radius:var(--r);background:var(--cedula-2)}
+.seta-grupo{display:inline-block;margin-right:9px;transition:transform .16s var(--ease);color:var(--tinta-3);
+  vertical-align:-1px}
+.seta-grupo.aberta{transform:rotate(90deg)}
+.risco-classe{display:inline-block;width:3px;height:12px;border-radius:2px;margin-right:8px;vertical-align:-1px}

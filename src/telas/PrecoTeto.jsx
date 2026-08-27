@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { buscarNoServidor } from '../lib/cotacoes'
 import { useDados } from '../ctx/Dados'
 import { Painel, Vazio, Modal, useRecibo } from '../comp/base'
 import { avaliar, MODELOS, ROTULO_SITUACAO, dpaPelosProventos } from '../lib/teto'
@@ -51,11 +52,13 @@ export default function PrecoTeto({ focoTicker, limparFoco }) {
         </div>
       </Painel>
 
+      <BuscarFundamentos elegiveis={elegiveis} />
+
       {semPremissa > 0 && (
         <div className="aviso atencao" style={{ marginBottom: 20 }}>
           <strong>{semPremissa} ativo{semPremissa === 1 ? '' : 's'} sem premissas.</strong>{' '}
-          DPA, LPA e VPA vêm do balanço da empresa ou do relatório gerencial do fundo. Você preenche
-          uma vez e fica salvo — só volta aqui quando sair balanço novo.
+          Use a busca acima para preencher DPA, LPA e VPA de uma vez, ou digite ativo por ativo em
+          Premissas. O que você digitar à mão nunca é sobrescrito pela busca.
         </div>
       )}
 
@@ -138,6 +141,9 @@ function FormPremissas({ posicao: p, aoFechar }) {
         yield_exigido: paraNumero(v.yield_exigido), taxa_exigida: paraNumero(v.taxa_exigida),
         crescimento: paraNumero(v.crescimento), margem: paraNumero(v.margem),
         metodos: v.metodos, nota: v.nota || null,
+        // salvar pelo formulário marca como conferido à mão, e a busca
+        // automática passa a respeitar esses números
+        origem: 'manual',
       })
       recibo('Premissas salvas.', 'ok')
       aoFechar()
@@ -246,5 +252,90 @@ function FormPremissas({ posicao: p, aoFechar }) {
         </div>
       </div>
     </Modal>
+  )
+}
+
+
+/**
+ * Preenche DPA, LPA e VPA de todos os ativos elegíveis numa tacada.
+ * O que veio da fonte é sempre marcado como tal, e valores digitados à mão
+ * ficam intocados — quem conferiu no balanço não perde o trabalho.
+ */
+function BuscarFundamentos({ elegiveis }) {
+  const { premissas, salvarPremissasLote, podeEscrever } = useDados()
+  const recibo = useRecibo()
+  const [ocupado, setOcupado] = useState(false)
+  const [resultado, setResultado] = useState(null)
+
+  async function buscar() {
+    setOcupado(true); setResultado(null)
+    try {
+      const r = await buscarNoServidor(elegiveis.map(p => p.ticker), { comFundamentos: true })
+      const achados = Object.entries(r.fundamentos)
+      if (!achados.length)
+        throw new Error(r.avisoFundamentos || 'A fonte não devolveu fundamentos desta vez.')
+
+      const lote = [], preservados = []
+      for (const [ticker, f] of achados) {
+        const atual = premissas.find(x => x.ticker === ticker)
+        const manual = atual && atual.origem !== 'yahoo'
+        if (manual) { preservados.push(ticker); continue }
+        lote.push({
+          ...(atual || {}),
+          ticker,
+          dpa: f.dpa ?? atual?.dpa ?? null,
+          lpa: f.lpa ?? atual?.lpa ?? null,
+          vpa: f.vpa ?? atual?.vpa ?? null,
+          yield_exigido: atual?.yield_exigido ?? 6,
+          taxa_exigida: atual?.taxa_exigida ?? 10,
+          crescimento: atual?.crescimento ?? 3,
+          margem: atual?.margem ?? 0,
+          metodos: atual?.metodos?.length ? atual.metodos : ['bazin', 'graham', 'gordon'],
+          origem: 'yahoo',
+          carteira_id: undefined,
+        })
+      }
+      const n = await salvarPremissasLote(lote.map(({ carteira_id, ...x }) => x))
+      setResultado({
+        gravados: n, preservados,
+        semRetorno: elegiveis.map(p => p.ticker).filter(t => !r.fundamentos[t]),
+        aviso: r.avisoFundamentos,
+      })
+      recibo(n ? `${n} ativo${n === 1 ? '' : 's'} preenchido${n === 1 ? '' : 's'}.` : 'Nada novo para gravar.', n ? 'ok' : '')
+    } catch (e) {
+      recibo(e.message, 'erro')
+      setResultado({ erro: e.message })
+    } finally { setOcupado(false) }
+  }
+
+  return (
+    <Painel titulo="Preencher premissas automaticamente" aoLado="dividendo, lucro e patrimônio por ação">
+      <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14, maxWidth: 820 }}>
+        A mesma função que busca as cotações traz também os números de balanço. É um bom ponto de
+        partida, não uma verdade final: a fonte não é oficial, arredonda e às vezes atrasa. Para um
+        ativo que pese na carteira, vale conferir no relatório e digitar — o que você digitar fica
+        protegido das buscas seguintes.
+      </p>
+      <button className="btn verde" onClick={buscar} disabled={ocupado || !podeEscrever}>
+        {ocupado ? 'Consultando…' : `Buscar para ${elegiveis.length} ativo${elegiveis.length === 1 ? '' : 's'}`}
+      </button>
+
+      {resultado && !resultado.erro && (
+        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {resultado.aviso && <div className="aviso atencao">{resultado.aviso}</div>}
+          {resultado.preservados.length > 0 && (
+            <div className="aviso info">
+              Mantive o que você já tinha digitado em: {resultado.preservados.join(', ')}.
+            </div>
+          )}
+          {resultado.semRetorno.length > 0 && (
+            <div className="aviso atencao">
+              Sem retorno da fonte para {resultado.semRetorno.join(', ')} — esses ficam para preenchimento
+              manual. FIIs menores costumam cair aqui.
+            </div>
+          )}
+        </div>
+      )}
+    </Painel>
   )
 }
