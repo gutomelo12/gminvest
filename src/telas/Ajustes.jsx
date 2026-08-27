@@ -152,6 +152,21 @@ function ConvidarConta() {
       if (error) throw new Error(await mensagemDeErroDaFuncao(error, 'convidar-cadastro'))
       if (data?.erro) throw new Error(data.erro)
       if (!data?.link) throw new Error('O convite foi criado, mas o link não veio na resposta.')
+      // se o Supabase não reconhece o endereço atual como permitido, ele troca
+      // silenciosamente pelo "Site URL" padrão do projeto — o convite sai com
+      // redirecionamento errado sem avisar em lugar nenhum, exceto aqui. Não
+      // libera a mensagem pra copiar nesse caso: um link que já se sabe
+      // quebrado não deveria chegar a ser mandado pra ninguém.
+      const paraOndeVolta = new URL(data.link).searchParams.get('redirect_to') || ''
+      if (paraOndeVolta && !paraOndeVolta.startsWith(window.location.origin)) {
+        carregarConvites()
+        return recibo(
+          `O link saiu apontando para ${paraOndeVolta}, não para ${window.location.origin}. ` +
+          `Isso significa que este endereço ainda não está liberado em Supabase → Authentication → ` +
+          `URL Configuration (Site URL e Redirect URLs). Corrija lá e gere um link novo — ` +
+          `este aqui não foi liberado para envio, porque cairia num endereço que não existe.`,
+          'erro')
+      }
       setLink(data.link)
       setReenvio(Boolean(data.reenvio))
       recibo(data.reenvio ? 'Já existia conta com esse e-mail — gerei um link de redefinição de senha.' : 'Link gerado.', 'ok')
