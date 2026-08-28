@@ -5,6 +5,7 @@ import { Guilhoche, ProvedorRecibos, iniciais } from './comp/base'
 import { fmtBRL, fmtHora } from './lib/formato'
 import Login from './telas/Login'
 import DefinirSenha from './telas/DefinirSenha'
+import AceitarConvite from './telas/AceitarConvite'
 import Resumo from './telas/Resumo'
 import Posicoes from './telas/Posicoes'
 import Operacoes from './telas/Operacoes'
@@ -41,6 +42,21 @@ const TELAS = {
 
 export default function App() {
   const { usuario, carregando, precisaDefinirSenha } = useSessao()
+
+  // link de convite (?convite=token) — não depende de sessão nenhuma,
+  // por isso vem antes até da checagem de carregando. Só some da URL
+  // depois de concluído, para não reaparecer se a pessoa atualizar a página.
+  const [tokenConvite, setTokenConvite] = useState(
+    () => new URLSearchParams(window.location.search).get('convite'))
+  if (tokenConvite) {
+    return <AceitarConvite token={tokenConvite} aoConcluir={() => {
+      const u = new URL(window.location.href)
+      u.searchParams.delete('convite')
+      window.history.replaceState({}, '', u)
+      setTokenConvite(null)
+    }} />
+  }
+
   if (carregando) return <div className="carregando">Carregando…</div>
   // vem antes de tudo — a pessoa já está autenticada pelo link do convite,
   // mas não pode entrar de fato sem antes escolher a própria senha
@@ -146,7 +162,14 @@ function Interior() {
             <span className="iniciais" style={{ background: d.carteira?.cor || '#0B6E4F' }}>
               {iniciais(d.carteira?.nome)}
             </span>
-            <span className="nome">{d.carteira?.nome || '—'}</span>
+            <span className="nome">
+              {d.carteira?.nome || '—'}
+              {d.carteira?.papel !== 'dono' && d.carteira?.dono && (
+                <span style={{ display: 'block', fontSize: 10.5, fontWeight: 400, opacity: .65 }}>
+                  de {d.carteira.dono.nome || d.carteira.dono.email}
+                </span>
+              )}
+            </span>
             <span className="seta">▾</span>
           </button>
         </div>

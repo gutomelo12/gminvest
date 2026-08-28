@@ -27,14 +27,30 @@ export function ProvedorDados({ children }) {
   /* --- lista de carteiras a que a pessoa tem acesso --- */
   const recarregarCarteiras = useCallback(async () => {
     if (!usuario) { setCarteiras([]); return [] }
+    // a política de segurança de "acessos" deixa ver a linha de qualquer
+    // pessoa que também acesse a mesma carteira (por causa da tela "Quem
+    // acessa esta carteira", que precisa listar todo mundo) — sem este
+    // filtro, a linha de acesso da OUTRA pessoa também virava uma entrada
+    // na SUA lista de carteiras, fazendo a mesma carteira aparecer em
+    // dobro assim que ela passava a ser compartilhada.
     const { data, error } = await sb
       .from('acessos')
       .select('papel, carteira:carteiras(id, nome, cor, criada_por, criada_em)')
+      .eq('usuario_id', usuario.id)
       .order('criado_em', { ascending: true })
     if (error) { setErro(error.message); return [] }
-    const lista = (data || [])
+    let lista = (data || [])
       .filter(a => a.carteira)
       .map(a => ({ ...a.carteira, papel: a.papel }))
+
+    // carteira de outra pessoa pode ter o mesmo nome da sua — sem saber de
+    // quem é, duas entradas iguais na lista ficam impossíveis de distinguir
+    const idsDonos = [...new Set(lista.filter(c => c.papel !== 'dono').map(c => c.criada_por).filter(Boolean))]
+    if (idsDonos.length) {
+      const { data: perfis } = await sb.from('perfis').select('id, email, nome').in('id', idsDonos)
+      const mapaPerfis = Object.fromEntries((perfis || []).map(p => [p.id, p]))
+      lista = lista.map(c => c.papel !== 'dono' ? { ...c, dono: mapaPerfis[c.criada_por] || null } : c)
+    }
     setCarteiras(lista)
     return lista
   }, [usuario])

@@ -122,7 +122,7 @@ function ConvidarConta() {
   const [nome, setNome] = useState('')
   const [ocupado, setOcupado] = useState(false)
   const [link, setLink] = useState(null)
-  const [reenvio, setReenvio] = useState(false)
+  const [horas, setHoras] = useState(48)
   const [copiado, setCopiado] = useState(false)
   const [convites, setConvites] = useState(null)
 
@@ -144,32 +144,15 @@ function ConvidarConta() {
   async function convidar() {
     const limpo = email.trim().toLowerCase()
     if (!limpo.includes('@')) return recibo('Informe um e-mail válido.', 'erro')
-    setOcupado(true); setLink(null); setCopiado(false); setReenvio(false)
+    setOcupado(true); setLink(null); setCopiado(false)
     try {
-      const { data, error } = await sb.functions.invoke('convidar-cadastro', {
-        body: { email: limpo, redirectTo: window.location.origin },
-      })
+      const { data, error } = await sb.functions.invoke('convidar-cadastro', { body: { email: limpo } })
       if (error) throw new Error(await mensagemDeErroDaFuncao(error, 'convidar-cadastro'))
       if (data?.erro) throw new Error(data.erro)
-      if (!data?.link) throw new Error('O convite foi criado, mas o link não veio na resposta.')
-      // se o Supabase não reconhece o endereço atual como permitido, ele troca
-      // silenciosamente pelo "Site URL" padrão do projeto — o convite sai com
-      // redirecionamento errado sem avisar em lugar nenhum, exceto aqui. Não
-      // libera a mensagem pra copiar nesse caso: um link que já se sabe
-      // quebrado não deveria chegar a ser mandado pra ninguém.
-      const paraOndeVolta = new URL(data.link).searchParams.get('redirect_to') || ''
-      if (paraOndeVolta && !paraOndeVolta.startsWith(window.location.origin)) {
-        carregarConvites()
-        return recibo(
-          `O link saiu apontando para ${paraOndeVolta}, não para ${window.location.origin}. ` +
-          `Isso significa que este endereço ainda não está liberado em Supabase → Authentication → ` +
-          `URL Configuration (Site URL e Redirect URLs). Corrija lá e gere um link novo — ` +
-          `este aqui não foi liberado para envio, porque cairia num endereço que não existe.`,
-          'erro')
-      }
-      setLink(data.link)
-      setReenvio(Boolean(data.reenvio))
-      recibo(data.reenvio ? 'Já existia conta com esse e-mail — gerei um link de redefinição de senha.' : 'Link gerado.', 'ok')
+      if (!data?.token) throw new Error('O convite foi criado, mas o token não veio na resposta.')
+      setLink(`${window.location.origin}/?convite=${data.token}`)
+      setHoras(data.horasDeValidade || 48)
+      recibo('Link gerado.', 'ok')
       carregarConvites()
     } catch (e) {
       recibo(e.message, 'erro')
@@ -177,13 +160,9 @@ function ConvidarConta() {
   }
 
   const mensagem = link
-    ? reenvio
-      ? `Oi${nome ? ' ' + nome : ''}! Notei que o acesso que criei pra você no gminvest ainda não foi `
-        + `finalizado. Clica nesse link pra definir (ou redefinir) sua senha e entrar:\n\n${link}\n\n`
-        + `O link expira em algumas horas, se der problema me chama que eu gero outro.`
-      : `Oi${nome ? ' ' + nome : ''}! Criei um acesso pra você no gminvest, o app que uso para organizar `
-        + `os investimentos. É só clicar no link, escolher uma senha e você já entra direto — a carteira `
-        + `é sua, começa vazia:\n\n${link}\n\nO link expira em algumas horas, se der problema me chama que eu gero outro.`
+    ? `Oi${nome ? ' ' + nome : ''}! Criei um acesso pra você no gminvest, o app que uso para organizar `
+      + `os investimentos. É só clicar no link, escolher uma senha e você já entra direto — a carteira `
+      + `é sua, começa vazia:\n\n${link}\n\nO link vale por ${horas} horas, se der problema me chama que eu gero outro.`
     : ''
 
   async function copiar() {
@@ -197,9 +176,11 @@ function ConvidarConta() {
       <Painel titulo="Convidar para o gminvest" aoLado="conta nova, sem vínculo com esta carteira">
         <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14, maxWidth: 800 }}>
           Gera um link de convite — nada de e-mail automático em inglês. Copie e mande você mesmo, por
-          WhatsApp ou onde preferir. Quem abrir o link escolhe a própria senha e cai direto em "criar minha
-          primeira carteira": nada aqui empresta acesso ao que já é seu. Convidar um e-mail que já foi
-          usado antes não dá erro — gera um link de redefinição de senha para essa mesma conta.
+          WhatsApp ou onde preferir. Abrir o link não gasta nada; só define a senha quando a pessoa
+          realmente enviar o formulário — então a prévia que o WhatsApp gera sozinho ao colar o link não
+          queima o convite antes da hora. Quem completa cai direto em "criar minha primeira carteira":
+          nada aqui empresta acesso ao que já é seu. Convidar um e-mail que já tem conta não dá erro —
+          troca a senha dessa conta ao ser usado.
         </p>
         <div className="grade" style={{ gridTemplateColumns: '1fr 1.8fr', maxWidth: 640, marginBottom: 10 }}>
           <label className="campo" style={{ marginBottom: 0 }}>
@@ -225,8 +206,8 @@ function ConvidarConta() {
             <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
               <button className="btn vazio" onClick={copiar}>{copiado ? 'Copiado!' : 'Copiar mensagem'}</button>
               <span style={{ fontSize: 12, color: 'var(--tinta-3)' }}>
-                A validade do link é a mesma configurada no seu projeto Supabase (Authentication → Email,
-                tempo de expiração do OTP) — de fábrica costuma ser de algumas horas.
+                Validade de {horas} horas, controlada pelo próprio gminvest — não depende de nenhuma
+                configuração do Supabase.
               </span>
             </div>
           </div>
@@ -249,9 +230,13 @@ function ConvidarConta() {
                       ? <span className="tag" style={{ color: 'var(--verde)', borderColor: 'var(--verde)' }}>
                           Entrou em {fmtData(c.usado_em.slice(0, 10))}
                         </span>
-                      : <span className="tag" style={{ color: 'var(--ambar)', borderColor: 'var(--ambar)' }}>
-                          Convite pendente
-                        </span>}
+                      : c.expira_em && new Date(c.expira_em) < new Date()
+                        ? <span className="tag" style={{ color: 'var(--vermelho)', borderColor: 'var(--vermelho)' }}>
+                            Expirado
+                          </span>
+                        : <span className="tag" style={{ color: 'var(--ambar)', borderColor: 'var(--ambar)' }}>
+                            Convite pendente
+                          </span>}
                   </td>
                 </tr>
               ))}</tbody>
@@ -259,8 +244,9 @@ function ConvidarConta() {
           </div>
         )}
         <p className="dica" style={{ marginTop: 12 }}>
-          "Entrou" significa que a pessoa terminou de definir a senha — só clicar no link ainda não conta,
-          porque o Supabase autentica antes desse passo.
+          "Entrou" significa que a pessoa terminou de escolher a senha — só abrir o link ainda não conta
+          para nada, de propósito. "Expirado" passa do prazo sozinho; gere um convite novo para a mesma
+          pessoa que ele some daqui.
         </p>
       </Painel>
     </>
@@ -385,8 +371,9 @@ function Compartilhamento({ carteira }) {
       <div className="dica" style={{ marginTop: 10 }}>
         {PAPEIS.map(([, r, d]) => <div key={r}><strong>{r}:</strong> {d}</div>)}
         <div style={{ marginTop: 6 }}>
-          O convite fica guardado e vira acesso na hora em que a pessoa entrar com esse e-mail. Se ela ainda
-          não tem conta, peça para criar uma em <strong>Criar conta</strong>, usando o mesmo endereço.
+          O convite fica guardado e vira acesso na hora em que a pessoa entrar com esse e-mail. Cadastro no
+          gminvest é só por convite — se ela ainda não tem conta, peça a quem administra o gminvest para
+          convidá-la primeiro (em Ajustes → Convidar para o gminvest), usando o mesmo endereço.
         </div>
       </div>
     </Painel>
@@ -400,21 +387,23 @@ export function SeletorCarteiras({ aoFechar }) {
   const [criando, setCriando] = useState(false)
   const [nome, setNome] = useState('')
   const [erro, setErro] = useState(null)
+  const [salvando, setSalvando] = useState(false)
   const cores = ['#0B6E4F', '#1C3F94', '#B87615', '#6B4E9E', '#9E2B2B', '#2C7A8C']
 
   return (
     <Modal titulo="Suas carteiras" aoFechar={aoFechar} pe={
       criando ? (
         <>
-          <button className="btn vazio" onClick={() => { setCriando(false); setErro(null) }}>Voltar</button>
-          <button className="btn verde" onClick={async () => {
+          <button className="btn vazio" onClick={() => { setCriando(false); setErro(null) }} disabled={salvando}>Voltar</button>
+          <button className="btn verde" disabled={salvando} onClick={async () => {
             if (nome.trim().length < 2) return setErro('Dê um nome à carteira.')
+            setSalvando(true)
             try {
               await criarCarteira(nome.trim(), cores[carteiras.length % cores.length])
               recibo('Carteira criada.', 'ok')
               aoFechar()
-            } catch (e) { setErro(e.message) }
-          }}>Criar</button>
+            } catch (e) { setErro(e.message); setSalvando(false) }
+          }}>{salvando ? 'Criando…' : 'Criar'}</button>
         </>
       ) : (
         <>
@@ -449,6 +438,7 @@ export function SeletorCarteiras({ aoFechar }) {
                 <span style={{ display: 'block', fontWeight: 600 }}>{c.nome}</span>
                 <span style={{ display: 'block', fontSize: 11, color: 'var(--tinta-3)' }}>
                   {rotuloPapel(c.papel)} · desde {fmtData(c.criada_em)}
+                  {c.papel !== 'dono' && c.dono && ` · de ${c.dono.nome || c.dono.email}`}
                 </span>
               </span>
               {c.id === carteiraId && <span className="rotulo">aberta</span>}

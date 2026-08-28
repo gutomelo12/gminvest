@@ -357,25 +357,33 @@ create policy p_admin_le_a_si_mesmo on public.administradores
 -- ------------------------------------------------------------
 --  Cadastro fechado por convite
 --  Ninguém cria conta sozinho, e o convite não empresta acesso a nenhuma
---  carteira sua — é uma conta nova e independente, do zero. Quem convida
---  (um administrador) manda um e-mail de verdade, com um link que deixa
---  a pessoa definir a própria senha; ao entrar pela primeira vez, ela cai
---  direto na tela de "criar minha primeira carteira", sem vínculo com
---  ninguém.
+--  carteira sua — é uma conta nova e independente, do zero.
 --
---  O gate é imposto no próprio banco (gatilho em auth.users), não só na
---  tela — chamar a API de cadastro por fora do app também é barrado.
---  Continua aceitando também quem foi convidado para compartilhar uma
---  carteira específica (a tabela "convites" de sempre), sem mudar aquele
---  fluxo.
+--  O convite é um token próprio, gerado por aqui — não passa pela conta de
+--  e-mail nem pelo link mágico do Supabase. Só a hash do token fica salva;
+--  o token bruto some depois de gerado, então nem um vazamento do banco
+--  entrega convites válidos. Isso também evita um problema real: link
+--  mágico é de uso único, e o WhatsApp (e a maioria dos apps de mensagem)
+--  pré-carrega o link para montar a prévia antes de qualquer humano
+--  clicar — o que já queimava o token do Supabase sozinho. Aqui, abrir o
+--  link (GET) não consome nada; só o envio da senha (POST) consome.
+--
+--  O gate de "só quem foi convidado pode ter conta" continua imposto no
+--  próprio banco (gatilho em auth.users), como sempre — chamar a API de
+--  cadastro por fora do app também é barrado. Continua aceitando também
+--  quem foi convidado para compartilhar uma carteira específica (a tabela
+--  "convites" de sempre), sem mudar aquele fluxo.
 -- ------------------------------------------------------------
 create table if not exists public.convites_cadastro (
   email         text primary key,
+  token_hash    text,
+  expira_em     timestamptz,
   usuario_id    uuid references auth.users(id) on delete set null,
   convidado_por uuid references auth.users(id),
   criado_em     timestamptz not null default now(),
   usado_em      timestamptz
 );
+create unique index if not exists ux_convites_cadastro_token on public.convites_cadastro(token_hash);
 
 alter table public.convites_cadastro enable row level security;
 
