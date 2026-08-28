@@ -76,17 +76,18 @@ export function distribuirAporte(linhas, totalAtual, aporte) {
  * segmento. Sem posição em nenhum ainda, divide igual. O resultado vira o
  * ponto de partida do alvo por ativo — editável depois, um por um.
  */
+/**
+ * Reparte o alvo de um segmento entre os ativos que o compõem, em partes
+ * iguais — cada ativo do segmento recebe o mesmo peso alvo, independente
+ * de quanto você já tem hoje de cada um. Isso é uma escolha deliberada,
+ * não a única possível: a alternativa (repartir proporcional ao que você
+ * já tem hoje) tende a simplesmente confirmar a posição que já está maior,
+ * em vez de apontar pra onde faltaria aportar dentro do segmento.
+ */
 export function cascatearSegmento(ativos, pctAlvoSegmento) {
   if (!ativos.length) return []
-  const totalSegmento = ativos.reduce((s, a) => s + a.valorAtual, 0)
-  if (totalSegmento <= 0) {
-    const cada = pctAlvoSegmento / ativos.length
-    return ativos.map(a => ({ ticker: a.ticker, percentual: cada }))
-  }
-  return ativos.map(a => ({
-    ticker: a.ticker,
-    percentual: pctAlvoSegmento * (a.valorAtual / totalSegmento),
-  }))
+  const cada = pctAlvoSegmento / ativos.length
+  return ativos.map(a => ({ ticker: a.ticker, percentual: cada }))
 }
 
 /**
@@ -125,16 +126,26 @@ export function distribuirAporteComReserva(linhas, totalAtual, aporte, reserva, 
  * ativo. Não é opinião sobre qual ativo é melhor — é aritmética sobre os
  * critérios que você mesmo configurou, organizada para decidir mais rápido.
  */
+/**
+ * Ranqueia ativos de UMA classe por desconto no teto e desvio do alvo
+ * individual. Espera receber `ativos` já filtrados para uma única classe —
+ * o alvo por ativo agora é percentual dentro da classe, não da carteira
+ * inteira, então a fatia de comparação também precisa ser calculada só
+ * dentro deste grupo, não com o `fatia` de calculo.js (que é sempre
+ * relativo à carteira toda).
+ */
 export function melhoresAtivosDaClasse(ativos, premissas, alvosPorAtivo) {
   const mapaAlvo = {}
   alvosPorAtivo.forEach(a => { if (a.nivel === 'ativo') mapaAlvo[a.chave] = paraNumero(a.percentual) })
+  const totalClasse = ativos.reduce((s, p) => s + p.valorAtual, 0)
 
   return ativos.map(p => {
     const prem = premissas.find(x => x.ticker === p.ticker)
     const av = avaliar(prem, p.precoAtual)
     const alvoPct = mapaAlvo[p.ticker]
+    const fatiaNaClasse = totalClasse > 0 ? p.valorAtual / totalClasse * 100 : 0
     // positivo = está abaixo do próprio alvo individual, ou seja, merece aporte
-    const desvioAlvo = alvoPct != null ? alvoPct - p.fatia : null
+    const desvioAlvo = alvoPct != null ? alvoPct - fatiaNaClasse : null
 
     let pontos = 0
     if (av.desconto != null) pontos += Math.max(0, av.desconto) * 2

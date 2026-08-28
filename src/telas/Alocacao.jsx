@@ -3,7 +3,7 @@ import { useDados } from '../ctx/Dados'
 import { Painel, Vazio, Barras, Ponto, useRecibo } from '../comp/base'
 import { comparar, distribuirAporteComReserva, cascatearSegmento, melhoresAtivosDaClasse } from '../lib/alocacao'
 import { ROTULO_SITUACAO } from '../lib/teto'
-import { fmtBRL, fmtPct, fmtPctSimples, fmtNum, paraNumero, corClasse, LISTA_CLASSES } from '../lib/formato'
+import { fmtBRL, fmtMoeda, fmtPct, fmtPctSimples, fmtNum, paraNumero, corClasse, LISTA_CLASSES } from '../lib/formato'
 
 const ABAS = [
   ['classe', 'Por classe'],
@@ -169,37 +169,49 @@ function PorSegmento({ d }) {
   // enquanto a pessoa está digitando aqui, uma etiqueta de segmento salva em
   // outro campo (que recarrega os dados sozinha, ao sair do campo) não pode
   // apagar o que ainda não foi salvo neste — por isso só resincroniza do
-  // servidor quando não há edição pendente.
+  // servidor quando não há edição pendente. A chave do rascunho é
+  // "classe|segmento": o alvo agora é dentro da classe, então o mesmo nome
+  // de segmento em duas classes precisa de duas entradas distintas.
   const rascunhoAlvoSujo = useRef(false)
   useEffect(() => {
     if (rascunhoAlvoSujo.current) return
     const m = {}
-    alvos.filter(a => a.nivel === 'segmento').forEach(a => { m[a.chave] = String(a.percentual).replace('.', ',') })
+    alvos.filter(a => a.nivel === 'segmento' && a.classe_pai)
+      .forEach(a => { m[a.classe_pai + '|' + a.chave] = String(a.percentual).replace('.', ',') })
     setRascunhoAlvo(m)
   }, [alvos])
-  const mudarRascunhoAlvo = (chave, valor) => {
+  const mudarRascunhoAlvo = (chaveComposta, valor) => {
     rascunhoAlvoSujo.current = true
-    setRascunhoAlvo(r => ({ ...r, [chave]: valor }))
+    setRascunhoAlvo(r => ({ ...r, [chaveComposta]: valor }))
   }
 
   const sugeridos = useMemo(
     () => [...new Set(Object.values(mapaSegmentos).filter(Boolean))].sort(), [mapaSegmentos])
 
+  const mapaClasseValor = useMemo(
+    () => Object.fromEntries(calc.classes.map(c => [c.classe, c.valor])), [calc.classes])
+
   const porClasse = useMemo(() => {
     const m = new Map()
     calc.abertas.forEach(p => { (m.get(p.classe) || m.set(p.classe, []).get(p.classe)).push(p) })
     return [...m.entries()].sort((a, b) =>
-      b[1].reduce((s, p) => s + p.valorAtual, 0) - a[1].reduce((s, p) => s + p.valorAtual, 0))
+      b[1].reduce((s, p) => s + (p.valorAtualBRL ?? 0), 0) - a[1].reduce((s, p) => s + (p.valorAtualBRL ?? 0), 0))
   }, [calc.abertas])
 
+  // um segmento agora pertence a uma classe — dois ativos com a mesma
+  // etiqueta de segmento mas classes diferentes viram dois grupos, não um.
+  // A soma usa o valor já convertido para real (valorAtualBRL) — um ETF
+  // Intern. cotado em dólar não pode somar direto com o resto, senão o
+  // "% atual" da classe sai completamente errado.
   const porSegmento = useMemo(() => {
     const m = new Map()
     calc.abertas.forEach(p => {
       const seg = mapaSegmentos[p.ticker]
       if (!seg) return
-      if (!m.has(seg)) m.set(seg, { segmento: seg, itens: [], valor: 0 })
-      const x = m.get(seg)
-      x.itens.push(p); x.valor += p.valorAtual
+      const chaveComposta = p.classe + '|' + seg
+      if (!m.has(chaveComposta)) m.set(chaveComposta, { segmento: seg, classe: p.classe, itens: [], valor: 0 })
+      const x = m.get(chaveComposta)
+      x.itens.push(p); x.valor += (p.valorAtualBRL ?? 0)
     })
     return [...m.values()].sort((a, b) => b.valor - a.valor)
   }, [calc.abertas, mapaSegmentos])
@@ -208,7 +220,6 @@ function PorSegmento({ d }) {
     <Painel><Vazio><p>Sem posições em aberto para organizar por segmento.</p></Vazio></Painel>
   )
 
-  const total = calc.total.valor
   const semSegmentoN = calc.abertas.filter(p => !mapaSegmentos[p.ticker]).length
 
   async function salvarTag(ticker) {
@@ -219,16 +230,28 @@ function PorSegmento({ d }) {
     } catch (e) { recibo(e.message, 'erro') }
   }
 
-  const alvosVivosSeg = Object.entries(rascunhoAlvo).map(([chave, v]) => ({ nivel: 'segmento', chave, percentual: paraNumero(v) }))
-  const somaSeg = alvosVivosSeg.reduce((s, a) => s + a.percentual, 0)
-  const cmpSeg = porSegmento.map(s => {
-    const alvoRow = alvosVivosSeg.find(a => a.chave === s.segmento)
-    const pctAlvo = alvoRow ? alvoRow.percentual : 0
-    const pctAtual = total > 0 ? s.valor / total * 100 : 0
-    return { ...s, pctAlvo, pctAtual, desvioPp: pctAtual - pctAlvo }
+  const alvosVivosSeg = Object.entries(rascunhoAlvo).map(([chaveComposta, v]) => {
+    const i = chaveComposta.indexOf('|')
+    return { nivel: 'segmento', classe_pai: chaveComposta.slice(0, i), chave: chaveComposta.slice(i + 1), percentual: paraNumero(v) }
   })
-  // segmentos com alvo definido mas ainda sem nenhum ativo etiquetado
-  const orfaos = alvosVivosSeg.filter(a => a.percentual > 0 && !porSegmento.some(s => s.segmento === a.chave))
+
+  // cada classe é sua própria mesa: alvo, atual e soma calculados só com o
+  // que está dentro dela, sem misturar com o resto da carteira
+  const porClasseComAlvo = porClasse.map(([classe]) => {
+    const segmentosDaClasse = porSegmento.filter(s => s.classe === classe)
+    const alvosDaClasse = alvosVivosSeg.filter(a => a.classe_pai === classe)
+    const somaClasse = alvosDaClasse.reduce((s, a) => s + a.percentual, 0)
+    const classeTotal = mapaClasseValor[classe] || 0
+    const linhas = segmentosDaClasse.map(s => {
+      const alvoRow = alvosDaClasse.find(a => a.chave === s.segmento)
+      const pctAlvo = alvoRow ? alvoRow.percentual : 0
+      const pctAtual = classeTotal > 0 ? s.valor / classeTotal * 100 : 0
+      return { ...s, pctAlvo, pctAtual, desvioPp: pctAtual - pctAlvo }
+    })
+    const orfaosClasse = alvosDaClasse.filter(a =>
+      a.percentual > 0 && !segmentosDaClasse.some(s => s.segmento === a.chave))
+    return { classe, linhas, somaClasse, orfaosClasse }
+  }).filter(c => c.linhas.length > 0 || c.orfaosClasse.length > 0)
 
   async function salvarEAplicar() {
     setSalvando(true)
@@ -236,7 +259,7 @@ function PorSegmento({ d }) {
       const cascata = {}
       for (const a of alvosVivosSeg) {
         if (a.percentual <= 0) continue
-        const grupo = porSegmento.find(s => s.segmento === a.chave)
+        const grupo = porSegmento.find(s => s.classe === a.classe_pai && s.segmento === a.chave)
         if (!grupo || !grupo.itens.length) continue
         cascatearSegmento(grupo.itens, a.percentual).forEach(x => { cascata[x.ticker] = x.percentual })
       }
@@ -281,7 +304,7 @@ function PorSegmento({ d }) {
                           onBlur={() => salvarTag(p.ticker)} />
                       ) : (mapaSegmentos[p.ticker] || <span className="nulo">—</span>)}
                     </td>
-                    <td className="n">{fmtBRL(p.valorAtual)}</td>
+                    <td className="n">{fmtMoeda(p.valorAtual, p.moeda)}</td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -291,48 +314,60 @@ function PorSegmento({ d }) {
         <datalist id="lista-segmentos">{sugeridos.map(s => <option key={s} value={s} />)}</datalist>
       </Painel>
 
-      <Painel titulo="Alvo por segmento" aoLado={<span className={somaSeg > 0 ? '' : 'nulo'}>soma {fmtPctSimples(somaSeg)} da carteira</span>}>
+      <Painel titulo="Alvo por segmento" aoLado="soma 100% dentro de cada classe, não da carteira inteira">
         <p style={{ fontSize: 13, color: 'var(--tinta-3)', marginBottom: 16, maxWidth: 820, lineHeight: 1.6 }}>
-          O percentual é sobre a carteira inteira, igual ao alvo por ativo. Ao salvar, cada segmento é
-          repartido entre os ativos que você etiquetou acima, proporcional ao peso atual de cada um —
-          e o resultado vira o alvo individual deles, que você ainda pode ajustar na aba "Por ativo".
+          O percentual é sobre a classe, não sobre a carteira inteira — os segmentos de Ação somam 100%
+          entre si, os de FII somam 100% entre si, cada classe é sua própria conta. Ao salvar, cada
+          segmento é repartido <strong>em partes iguais</strong> entre os ativos que você etiquetou acima
+          — 25% para Bancos com dois bancos vira 12,5% para cada um, não importa quanto você já tem de
+          cada — e o resultado vira o alvo individual deles, que você ainda pode ajustar na aba
+          "Por ativo" (que segue essa mesma regra: soma 100% dentro da classe).
         </p>
-        {porSegmento.length === 0 ? (
+        {porClasseComAlvo.length === 0 ? (
           <Vazio><p>Etiquete pelo menos um ativo com um segmento, acima, para começar.</p></Vazio>
-        ) : (
-          <div className="rolagem">
-            <table>
-              <thead><tr><th>Segmento</th><th>Alvo</th><th>Atual</th><th>Desvio</th><th>Ativos</th></tr></thead>
-              <tbody>{cmpSeg.map(s => (
-                <tr key={s.segmento}>
-                  <td>{s.segmento}</td>
-                  <td>
-                    {podeEscrever ? (
-                      <input className="celula" style={{ width: 78 }} inputMode="decimal"
-                        value={rascunhoAlvo[s.segmento] ?? ''} placeholder="0"
-                        onChange={e => mudarRascunhoAlvo(s.segmento, e.target.value)} />
-                    ) : <span className="num">{fmtPctSimples(s.pctAlvo)}</span>}
-                  </td>
-                  <td className="n">{fmtPctSimples(s.pctAtual)}</td>
-                  <td className={'n ' + (Math.abs(s.desvioPp) < 1 ? 'nulo' : s.desvioPp > 0 ? 'neg' : 'pos')}>
-                    {s.pctAlvo === 0 && s.pctAtual === 0 ? '—' : `${s.desvioPp > 0 ? '+' : ''}${fmtNum(s.desvioPp, 1)} p.p.`}
-                  </td>
-                  <td style={{ textAlign: 'left', fontSize: 11.5, color: 'var(--tinta-3)' }}>
-                    {s.itens.map(i => i.ticker).join(', ')}
-                  </td>
-                </tr>
-              ))}</tbody>
-            </table>
+        ) : porClasseComAlvo.map(({ classe, linhas, somaClasse, orfaosClasse }) => (
+          <div key={classe} style={{ marginBottom: 24 }}>
+            <div className="rotulo" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span><Ponto classe={classe} />{classe}</span>
+              <span className={Math.abs(somaClasse - 100) < 0.01 ? 'pos' : somaClasse > 0 ? 'neg' : 'nulo'}>
+                soma {fmtPctSimples(somaClasse)} de {classe}
+              </span>
+            </div>
+            <div className="rolagem">
+              <table>
+                <thead><tr><th>Segmento</th><th>Alvo</th><th>Atual</th><th>Desvio</th><th>Ativos</th></tr></thead>
+                <tbody>{linhas.map(s => (
+                  <tr key={s.segmento}>
+                    <td>{s.segmento}</td>
+                    <td>
+                      {podeEscrever ? (
+                        <input className="celula" style={{ width: 78 }} inputMode="decimal"
+                          value={rascunhoAlvo[classe + '|' + s.segmento] ?? ''} placeholder="0"
+                          onChange={e => mudarRascunhoAlvo(classe + '|' + s.segmento, e.target.value)} />
+                      ) : <span className="num">{fmtPctSimples(s.pctAlvo)}</span>}
+                    </td>
+                    <td className="n">{fmtPctSimples(s.pctAtual)}</td>
+                    <td className={'n ' + (Math.abs(s.desvioPp) < 1 ? 'nulo' : s.desvioPp > 0 ? 'neg' : 'pos')}>
+                      {s.pctAlvo === 0 && s.pctAtual === 0 ? '—' : `${s.desvioPp > 0 ? '+' : ''}${fmtNum(s.desvioPp, 1)} p.p.`}
+                    </td>
+                    <td style={{ textAlign: 'left', fontSize: 11.5, color: 'var(--tinta-3)' }}>
+                      {s.itens.map(i => i.ticker).join(', ')}
+                    </td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+            {orfaosClasse.length > 0 && (
+              <div className="aviso atencao" style={{ marginTop: 10 }}>
+                {orfaosClasse.map(o => o.chave).join(', ')} {orfaosClasse.length === 1 ? 'tem' : 'têm'} alvo
+                dentro de {classe} mas nenhum ativo etiquetado ainda — nada será aplicado para{' '}
+                {orfaosClasse.length === 1 ? 'ele' : 'eles'}.
+              </div>
+            )}
           </div>
-        )}
-        {orfaos.length > 0 && (
-          <div className="aviso atencao" style={{ marginTop: 14 }}>
-            {orfaos.map(o => o.chave).join(', ')} {orfaos.length === 1 ? 'tem' : 'têm'} alvo mas nenhum
-            ativo etiquetado ainda — nada será aplicado para {orfaos.length === 1 ? 'ele' : 'eles'}.
-          </div>
-        )}
-        {podeEscrever && porSegmento.length > 0 && (
-          <div style={{ marginTop: 18 }}>
+        ))}
+        {podeEscrever && porClasseComAlvo.length > 0 && (
+          <div style={{ marginTop: 6 }}>
             <button className="btn verde" onClick={salvarEAplicar} disabled={salvando}>
               {salvando ? 'Aplicando…' : 'Salvar e aplicar aos ativos'}
             </button>
@@ -349,7 +384,6 @@ function PorSegmento({ d }) {
 function PorAtivo({ d }) {
   const { calc, alvos, salvarAlvos, podeEscrever } = d
   const recibo = useRecibo()
-  const total = calc.total.valor
   const [rascunho, setRascunho] = useState({})
 
   useEffect(() => {
@@ -362,7 +396,14 @@ function PorAtivo({ d }) {
     <Painel><Vazio><p>Sem posições em aberto para definir alvo por ativo.</p></Vazio></Painel>
   )
 
-  const soma = Object.values(rascunho).reduce((s, v) => s + paraNumero(v), 0)
+  const mapaClasseValor = Object.fromEntries(calc.classes.map(c => [c.classe, c.valor]))
+
+  const porClasse = (() => {
+    const m = new Map()
+    calc.abertas.forEach(p => { (m.get(p.classe) || m.set(p.classe, []).get(p.classe)).push(p) })
+    return [...m.entries()].sort((a, b) =>
+      b[1].reduce((s, p) => s + p.valorAtual, 0) - a[1].reduce((s, p) => s + p.valorAtual, 0))
+  })()
 
   async function salvar() {
     const semAtivo = alvos.filter(a => a.nivel !== 'ativo')
@@ -379,42 +420,59 @@ function PorAtivo({ d }) {
   }
 
   return (
-    <Painel titulo="Alvo por ativo" aoLado={<span className={soma > 100.01 ? 'neg' : ''}>soma {fmtPctSimples(soma)} da carteira</span>}>
+    <Painel titulo="Alvo por ativo" aoLado="soma 100% dentro de cada classe, não da carteira inteira">
       <p style={{ fontSize: 13, color: 'var(--tinta-3)', marginBottom: 16, maxWidth: 780, lineHeight: 1.6 }}>
-        Percentual sobre a carteira inteira, não sobre a classe. Deixe em branco os ativos que você não
-        quer travar num peso específico. Ativos cujo alvo veio da aba "Por segmento" aparecem aqui já
-        preenchidos — edite à vontade, o ajuste manual sempre vence.
+        Percentual sobre a classe, não sobre a carteira inteira — os ativos de Ação somam 100% entre si,
+        os de FII somam 100% entre si. Deixe em branco os ativos que você não quer travar num peso
+        específico. Ativos cujo alvo veio da aba "Por segmento" aparecem aqui já preenchidos — edite à
+        vontade, o ajuste manual sempre vence.
       </p>
-      <div className="rolagem">
-        <table>
-          <thead><tr><th>Ativo</th><th>Alvo</th><th>Atual</th><th>Desvio</th><th>Em reais</th><th>Valor hoje</th></tr></thead>
-          <tbody>{calc.abertas.map(p => {
-            const alvo = paraNumero(rascunho[p.ticker])
-            const desvio = p.fatia - alvo
-            const desvioRS = p.valorAtual - total * alvo / 100
-            return (
-              <tr key={p.ticker}>
-                <td><span className="ticker">{p.ticker}</span><span className="classe">{p.classe}</span></td>
-                <td>{podeEscrever ? (
-                  <input className="celula" style={{ width: 78 }} inputMode="decimal"
-                    value={rascunho[p.ticker] ?? ''} placeholder="—"
-                    onChange={e => setRascunho(r => ({ ...r, [p.ticker]: e.target.value }))} />
-                ) : <span className="num">{alvo ? fmtPctSimples(alvo) : '—'}</span>}</td>
-                <td className="n">{fmtPctSimples(p.fatia)}</td>
-                <td className={'n ' + (!alvo ? 'nulo' : Math.abs(desvio) < 1 ? 'nulo' : desvio > 0 ? 'neg' : 'pos')}>
-                  {alvo ? `${desvio > 0 ? '+' : ''}${fmtNum(desvio, 1)} p.p.` : '—'}
-                </td>
-                <td className={'n ' + (!alvo ? 'nulo' : desvioRS > 0 ? 'neg' : 'pos')}>
-                  {alvo ? fmtBRL(desvioRS) : '—'}
-                </td>
-                <td className="n">{fmtBRL(p.valorAtual)}</td>
-              </tr>
-            )
-          })}</tbody>
-        </table>
-      </div>
+      {porClasse.map(([classe, itensClasse]) => {
+        const classeTotal = mapaClasseValor[classe] || 0
+        const somaClasse = itensClasse.reduce((s, p) => s + paraNumero(rascunho[p.ticker]), 0)
+        return (
+          <div key={classe} style={{ marginBottom: 24 }}>
+            <div className="rotulo" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span><Ponto classe={classe} />{classe}</span>
+              <span className={Math.abs(somaClasse - 100) < 0.01 ? 'pos' : somaClasse > 100.01 ? 'neg' : ''}>
+                soma {fmtPctSimples(somaClasse)} de {classe}
+              </span>
+            </div>
+            <div className="rolagem">
+              <table>
+                <thead><tr><th>Ativo</th><th>Alvo</th><th>Atual</th><th>Desvio</th><th>Em reais</th><th>Valor hoje</th></tr></thead>
+                <tbody>{itensClasse.map(p => {
+                  const alvo = paraNumero(rascunho[p.ticker])
+                  const valorBRL = p.valorAtualBRL ?? 0
+                  const fatiaClasse = classeTotal > 0 ? valorBRL / classeTotal * 100 : 0
+                  const desvio = fatiaClasse - alvo
+                  const desvioRS = valorBRL - classeTotal * alvo / 100
+                  return (
+                    <tr key={p.ticker}>
+                      <td><span className="ticker">{p.ticker}</span></td>
+                      <td>{podeEscrever ? (
+                        <input className="celula" style={{ width: 78 }} inputMode="decimal"
+                          value={rascunho[p.ticker] ?? ''} placeholder="—"
+                          onChange={e => setRascunho(r => ({ ...r, [p.ticker]: e.target.value }))} />
+                      ) : <span className="num">{alvo ? fmtPctSimples(alvo) : '—'}</span>}</td>
+                      <td className="n">{fmtPctSimples(fatiaClasse)}</td>
+                      <td className={'n ' + (!alvo ? 'nulo' : Math.abs(desvio) < 1 ? 'nulo' : desvio > 0 ? 'neg' : 'pos')}>
+                        {alvo ? `${desvio > 0 ? '+' : ''}${fmtNum(desvio, 1)} p.p.` : '—'}
+                      </td>
+                      <td className={'n ' + (!alvo ? 'nulo' : desvioRS > 0 ? 'neg' : 'pos')}>
+                        {alvo ? fmtBRL(desvioRS) : '—'}
+                      </td>
+                      <td className="n">{fmtMoeda(p.valorAtual, p.moeda)}</td>
+                    </tr>
+                  )
+                })}</tbody>
+              </table>
+            </div>
+          </div>
+        )
+      })}
       {podeEscrever && (
-        <div style={{ marginTop: 18 }}>
+        <div style={{ marginTop: 6 }}>
           <button className="btn verde" onClick={salvar}>Salvar alvos por ativo</button>
         </div>
       )}

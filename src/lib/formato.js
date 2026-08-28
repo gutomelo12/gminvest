@@ -109,7 +109,7 @@ export const CLASSES_MOEDA_ESTRANGEIRA = ['ETFs Intern.']
  * Um CDB não tem cotação para buscar — ele é marcado a custo mesmo,
  * então não faz sentido avisar "sem cotação" para ele.
  */
-export const CLASSES_SEM_COTACAO_ESPERADA = ['Renda Fixa']
+export const CLASSES_SEM_COTACAO_ESPERADA = ['Renda Fixa', 'Tesouro Direto']
 
 /**
  * O sufixo F marca o mercado fracionário, que permite comprar menos de um

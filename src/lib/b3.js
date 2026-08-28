@@ -78,8 +78,19 @@ function traduzir(mov, entSai, qtd, precoU, valor, produto, data, inst) {
   // não entrarem junto e dobrarem a carteira.
   if (m.includes('liquidacao') || m.includes('compra / venda') || m.includes('compra/venda'))
     return { destino: 'operacao', liquidacao: true, ...base, tipo: credito ? 'compra' : 'venda', quantidade: qtd, preco: pu(), taxas: 0 }
-  if (m === 'compra' || m === 'venda' || m.startsWith('compra ') || m.startsWith('venda '))
-    return { destino: 'operacao', liquidacao: true, ...base, tipo: m.startsWith('venda') ? 'venda' : 'compra', quantidade: qtd, preco: pu(), taxas: 0 }
+  if (m === 'compra' || m === 'venda' || m.startsWith('compra ') || m.startsWith('venda ')) {
+    // "Compra"/"Venda" isoladas, sem "liquidação" no nome, é como o Tesouro
+    // Direto aparece no relatório — e ele nunca é negociado pela bolsa, então
+    // nunca tem uma linha gêmea no relatório de Negociação para duplicar.
+    // Ação e FII usam "Transferência - Liquidação" para a mesma ideia (regra
+    // acima). Sem esta distinção, a compra do Tesouro entrava desmarcada por
+    // padrão na conferência, esperando alguém lembrar de marcar na mão.
+    const provavelDuplicataDeBolsa = classe !== 'Tesouro Direto'
+    return {
+      destino: 'operacao', liquidacao: provavelDuplicataDeBolsa, ...base,
+      tipo: m.startsWith('venda') ? 'venda' : 'compra', quantidade: qtd, preco: pu(), taxas: 0,
+    }
+  }
   if (m.includes('resgate'))
     return { destino: 'operacao', ...base, tipo: 'venda', quantidade: qtd, preco: pu(), taxas: 0 }
   if (m.includes('bonificacao'))

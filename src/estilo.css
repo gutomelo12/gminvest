@@ -23,7 +23,8 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body,#root{height:100%}
-body{font-family:var(--sans);font-size:14px;line-height:1.5;color:var(--tinta);background:var(--cedula);-webkit-font-smoothing:antialiased}
+body{font-family:var(--sans);font-size:14px;line-height:1.5;color:var(--tinta);background:var(--cedula);
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--azul);outline-offset:2px}
 a{color:var(--azul)}
@@ -97,6 +98,7 @@ code{font-family:var(--mono);font-size:.9em;background:var(--cedula-2);padding:1
 .seletor .nome{font-family:var(--serif);font-size:15.5px;font-weight:600;flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .seletor .seta{opacity:.5;font-size:11px}
+.menu-hamb{display:none}
 .iniciais{flex:0 0 auto;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;
   font-family:var(--serif);font-size:13px;font-weight:600;color:#fff}
 .iniciais.g{width:34px;height:34px;font-size:14px}
@@ -232,11 +234,33 @@ td input.celula{width:104px;text-align:right;font-family:var(--mono);padding:5px
 
 @media (max-width:880px){
   .app{grid-template-columns:1fr}
+  /* sem isto, um item de grid recusa encolher abaixo do tamanho do seu
+     conteúdo (é o comportamento padrão, não é bug do navegador) — e um
+     nav largo por dentro empurrava a página inteira para o lado,
+     obrigando a rolar a tela toda em vez de só o menu */
+  .lateral,main{min-width:0}
   .lateral{position:static;height:auto;padding:14px 0}
-  .lateral-marca{padding:0 16px 12px}
-  .lateral-topo{padding:0 14px 12px}
-  nav{flex-direction:row;overflow-x:auto;padding:8px;gap:2px;-webkit-overflow-scrolling:touch}
-  nav button{white-space:nowrap;flex:0 0 auto;padding:8px 10px;font-size:12.5px;gap:6px}
+  .lateral-marca{padding:0 16px 10px;text-align:center}
+  /* a logo é larga (é uma faixa horizontal), pensada para os 224px da
+     coluna do notebook — na largura inteira do celular ela ficava enorme.
+     Trava um tamanho fixo pequeno em vez de 100% do contêiner. */
+  .lateral-marca img{max-width:150px;width:150px;margin:0 auto}
+
+  /* a carteira aberta encolhe, e um botão de hambúrguer ao lado dela
+     abre/fecha o menu — em vez do menu ficar sempre visível ocupando
+     altura da tela, ou virar uma faixa horizontal para rolar de lado */
+  .lateral-topo{padding:0 14px 10px;border-bottom:none}
+  .lateral-topo .rotulo{display:none}
+  .seletor{margin-top:0;padding:6px 8px}
+  .seletor .iniciais{width:26px;height:26px;font-size:12px}
+  .seletor .nome{font-size:13.5px}
+  .menu-hamb{flex:0 0 auto;width:38px;height:38px;border-radius:8px;border:1px solid rgba(255,255,255,.14);
+    background:transparent;color:var(--cedula-2);display:grid;place-items:center;cursor:pointer}
+  .menu-hamb:hover{background:rgba(255,255,255,.06)}
+
+  nav{display:none;padding:6px 10px 14px}
+  nav.aberto{display:flex}
+
   .lateral-pe{padding:10px 16px 0}
   .cabecalho{padding:20px 18px 16px}
   .cabecalho h2{font-size:20px}

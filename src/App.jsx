@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useSessao } from './ctx/Sessao'
 import { ProvedorDados, useDados } from './ctx/Dados'
-import { Guilhoche, ProvedorRecibos, iniciais } from './comp/base'
-import { fmtBRL, fmtHora } from './lib/formato'
+import { Guilhoche, ProvedorRecibos, useRecibo, iniciais } from './comp/base'
+import { fmtBRL, fmtHora, CLASSES_COM_COTACAO } from './lib/formato'
+import { buscarNoServidor } from './lib/cotacoes'
 import Login from './telas/Login'
 import DefinirSenha from './telas/DefinirSenha'
 import AceitarConvite from './telas/AceitarConvite'
@@ -75,7 +76,9 @@ export default function App() {
 function Interior() {
   const d = useDados()
   const { sair } = useSessao()
+  const recibo = useRecibo()
   const [tela, setTela] = useState('resumo')
+  const [buscandoCotacoes, setBuscandoCotacoes] = useState(false)
 
   /**
    * Busca as cotações uma vez por carteira aberta nesta sessão do
@@ -107,10 +110,33 @@ function Interior() {
 
   const [foco, setFoco] = useState(null)
   const [seletor, setSeletor] = useState(false)
+  const [menuMobile, setMenuMobile] = useState(false)
   const [editandoOp, setEditandoOp] = useState(null)
   const [editandoPv, setEditandoPv] = useState(null)
 
-  const ir = (t, arg) => { setTela(t); setFoco(arg ?? null); window.scrollTo(0, 0) }
+  const ir = (t, arg) => { setTela(t); setFoco(arg ?? null); setMenuMobile(false); window.scrollTo(0, 0) }
+
+  /**
+   * Igual ao botão "Buscar cotações" de dentro da tela Cotações, só que
+   * acessível direto do Resumo — com aviso de resultado, ao contrário da
+   * busca automática da abertura, que fica silenciosa de propósito.
+   */
+  async function atualizarCotacoes() {
+    const alvos = d.calc.abertas.filter(p => CLASSES_COM_COTACAO.includes(p.classe)).map(p => p.ticker)
+    if (d.calc.abertas.some(p => p.moeda === 'USD')) alvos.push('USDBRL')
+    if (!alvos.length) return recibo('Nenhum ativo de bolsa em carteira para cotar.')
+    setBuscandoCotacoes(true)
+    try {
+      const r = await buscarNoServidor(alvos)
+      const n = Object.keys(r.precos).length
+      if (!n) throw new Error('A fonte respondeu, mas sem preços para estes ativos.')
+      await d.salvarCotacoes(r.precos, 'yahoo')
+      const extra = r.falhas.length ? ` ${r.falhas.length} sem retorno: ${r.falhas.join(', ')}.` : ''
+      recibo(`${n} cotaç${n === 1 ? 'ão atualizada' : 'ões atualizadas'}.${extra}`, 'ok')
+    } catch (e) {
+      recibo(e.message, 'erro')
+    } finally { setBuscandoCotacoes(false) }
+  }
 
   if (!d.carteiras.length && !d.carregando) return <PrimeiraCarteira />
 
@@ -133,7 +159,10 @@ function Interior() {
   }
 
   const acoes = {
-    resumo: d.podeEscrever && [['Lançar operação', () => { setEditandoOp({}); setTela('operacoes') }, 'verde']],
+    resumo: d.podeEscrever && [
+      ['Lançar operação', () => { setEditandoOp({}); setTela('operacoes') }, 'verde'],
+      [buscandoCotacoes ? 'Atualizando…' : 'Atualizar cotações', atualizarCotacoes, 'vazio', buscandoCotacoes],
+    ],
     posicoes: d.podeEscrever && [['Lançar operação', () => { setEditandoOp({}); setTela('operacoes') }, 'verde']],
     operacoes: d.podeEscrever && [
       ['Lançar operação', () => setEditandoOp({}), 'verde'],
@@ -163,22 +192,29 @@ function Interior() {
         </div>
         <div className="lateral-topo">
           <div className="rotulo">Carteira aberta</div>
-          <button className="seletor" onClick={() => setSeletor(true)}>
-            <span className="iniciais" style={{ background: d.carteira?.cor || '#0B6E4F' }}>
-              {iniciais(d.carteira?.nome)}
-            </span>
-            <span className="nome">
-              {d.carteira?.nome || '—'}
-              {d.carteira?.papel !== 'dono' && d.carteira?.dono && (
-                <span style={{ display: 'block', fontSize: 10.5, fontWeight: 400, opacity: .65 }}>
-                  de {d.carteira.dono.nome || d.carteira.dono.email}
-                </span>
-              )}
-            </span>
-            <span className="seta">▾</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="seletor" onClick={() => setSeletor(true)}>
+              <span className="iniciais" style={{ background: d.carteira?.cor || '#0B6E4F' }}>
+                {iniciais(d.carteira?.nome)}
+              </span>
+              <span className="nome">
+                {d.carteira?.nome || '—'}
+                {d.carteira?.papel !== 'dono' && d.carteira?.dono && (
+                  <span style={{ display: 'block', fontSize: 10.5, fontWeight: 400, opacity: .65 }}>
+                    de {d.carteira.dono.nome || d.carteira.dono.email}
+                  </span>
+                )}
+              </span>
+              <span className="seta">▾</span>
+            </button>
+            <button className="menu-hamb" aria-label="Abrir menu" aria-expanded={menuMobile}
+              onClick={() => setMenuMobile(a => !a)}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+            </button>
+          </div>
         </div>
-        <nav>
+        <nav className={menuMobile ? 'aberto' : ''}>
           {Object.entries(TELAS).map(([k, r]) => (
             <button key={k} className={tela === k ? 'ativo' : ''} onClick={() => ir(k)}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -205,8 +241,8 @@ function Interior() {
               <div className="sub">{subtitulos[tela]}</div>
             </div>
             <div className="acoes-cab">
-              {acoes.map(([rot, fn, cls]) => (
-                <button key={rot} className={'btn ' + cls} onClick={fn}>{rot}</button>
+              {acoes.map(([rot, fn, cls, desabilitado]) => (
+                <button key={rot} className={'btn ' + cls} onClick={fn} disabled={Boolean(desabilitado)}>{rot}</button>
               ))}
             </div>
           </div>

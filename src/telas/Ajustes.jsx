@@ -263,13 +263,39 @@ function Compartilhamento({ carteira }) {
 
   const carregar = async () => {
     const [a, c] = await Promise.all([
-      sb.from('acessos').select('usuario_id, papel, perfil:perfis(email, nome)').eq('carteira_id', carteira.id),
+      sb.from('acessos').select('usuario_id, papel').eq('carteira_id', carteira.id),
       sb.from('convites').select('*').eq('carteira_id', carteira.id).is('aceito_em', null),
     ])
-    setAcessos(a.data || [])
+    // isto tem dado "0 pessoas" mesmo com o dado certo no banco. A causa
+    // mais provável: "perfil:perfis(...)" pedia pro PostgREST juntar
+    // acessos com perfis sozinho, mas não existe chave estrangeira direta
+    // entre as duas tabelas — as duas apontam pra auth.users, não uma pra
+    // outra. Troquei para uma busca separada dos perfis, do mesmo jeito
+    // que já funciona pra achar o dono de uma carteira em outro lugar do
+    // sistema. O erro fica exposto de qualquer forma, para nunca mais
+    // "vazio" e "deu erro" parecerem a mesma coisa.
+    if (a.error) recibo('Erro ao carregar quem acessa: ' + a.error.message, 'erro')
+    if (c.error) recibo('Erro ao carregar convites pendentes: ' + c.error.message, 'erro')
+    const linhas = a.data || []
+    const ids = [...new Set(linhas.map(x => x.usuario_id))]
+    let mapaPerfis = {}
+    if (ids.length) {
+      const { data: perfis, error: eP } = await sb.from('perfis').select('id, email, nome').in('id', ids)
+      if (eP) recibo('Erro ao carregar os perfis de quem acessa: ' + eP.message, 'erro')
+      mapaPerfis = Object.fromEntries((perfis || []).map(p => [p.id, p]))
+    }
+    const comPerfil = linhas.map(x => ({ ...x, perfil: mapaPerfis[x.usuario_id] || null }))
+    setAcessos(comPerfil)
     setConvites(c.data || [])
+    return comPerfil
   }
-  useEffect(() => { carregar() }, [carteira.id])
+  useEffect(() => {
+    let vivo = true
+    carregar().then(lista => {
+      if (vivo && lista.length === 0) setTimeout(() => { if (vivo) carregar() }, 500)
+    })
+    return () => { vivo = false }
+  }, [carteira.id])
 
   async function convidar() {
     const email = novo.email.trim().toLowerCase()
@@ -648,7 +674,13 @@ function Classificacao() {
 
       <div className="rolagem">
         <table>
-          <thead><tr><th>Ativo</th><th>Classe</th><th>Definida por</th><th>Sugestão</th><th>Valor</th><th /></tr></thead>
+          <thead><tr>
+            <th>Ativo</th>
+            <th style={{ textAlign: 'left' }}>Classe</th>
+            <th style={{ textAlign: 'left' }}>Definida por</th>
+            <th style={{ textAlign: 'left' }}>Sugestão</th>
+            <th>Valor</th><th />
+          </tr></thead>
           <tbody>{ativos.map(p => {
             const manual = Boolean(mapaClasses[p.ticker])
             const sugerida = inferirClasse(p.ticker, '')

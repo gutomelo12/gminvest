@@ -532,3 +532,32 @@ drop policy if exists p_cores_classe_escrever on public.cores_classe;
 create policy p_cores_classe_escrever on public.cores_classe
   for all using (public.pode_escrever(carteira_id))
   with check (public.pode_escrever(carteira_id));
+
+-- ------------------------------------------------------------
+--  Alvo por segmento e por ativo passam a valer dentro da classe, não
+--  mais sobre a carteira inteira. Isso deixa o nome de um segmento livre
+--  para se repetir em classes diferentes (ex.: "Diversos" em Ação e em
+--  FII) sem colidir — a trava de duplicidade da tabela precisa saber
+--  disso, senão dois segmentos de mesmo nome em classes diferentes
+--  travariam um no outro.
+--
+--  classe_pai é nulo para alvo de classe (não tem "classe pai" de si
+--  mesma) — e o Postgres nunca trata dois nulos como iguais numa
+--  constraint normal de unicidade, o que destravaria sem querer a
+--  duplicidade de classe. Por isso é um índice com coalesce, não uma
+--  constraint direta: nulo vira string vazia só para efeito da trava.
+-- ------------------------------------------------------------
+do $$
+declare nome_constraint text;
+begin
+  select conname into nome_constraint
+  from pg_constraint
+  where conrelid = 'public.alocacao_alvo'::regclass and contype = 'u';
+  if nome_constraint is not null then
+    execute format('alter table public.alocacao_alvo drop constraint %I', nome_constraint);
+  end if;
+end $$;
+
+drop index if exists public.alocacao_alvo_unico;
+create unique index alocacao_alvo_unico
+  on public.alocacao_alvo (carteira_id, nivel, chave, coalesce(classe_pai, ''));
