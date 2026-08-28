@@ -232,13 +232,56 @@ td input.celula{width:104px;text-align:right;font-family:var(--mono);padding:5px
 
 @media (max-width:880px){
   .app{grid-template-columns:1fr}
-  .lateral{position:static;height:auto}
-  nav{flex-direction:row;overflow-x:auto;padding:10px}
-  nav button{white-space:nowrap}
-  .cabecalho,.conteudo{padding-inline:18px}
+  .lateral{position:static;height:auto;padding:14px 0}
+  .lateral-marca{padding:0 16px 12px}
+  .lateral-topo{padding:0 14px 12px}
+  nav{flex-direction:row;overflow-x:auto;padding:8px;gap:2px;-webkit-overflow-scrolling:touch}
+  nav button{white-space:nowrap;flex:0 0 auto;padding:8px 10px;font-size:12.5px;gap:6px}
+  .lateral-pe{padding:10px 16px 0}
+  .cabecalho{padding:20px 18px 16px}
+  .cabecalho h2{font-size:20px}
+  .conteudo{padding:18px}
   .duas{grid-template-columns:1fr}
   .duas-largas{grid-template-columns:1fr}
   .linha-resumo{grid-template-columns:1fr}
+  .cartao.destaque{padding:16px}
+
+  /* tabela larga vira rolagem lateral dentro do próprio cartão, sem
+     empurrar o restante da página — o conteúdo em volta continua
+     empilhado normalmente, só a tabela desliza */
+  table{font-size:12.5px}
+  th,td{padding:8px 10px}
+  td input.celula{width:84px}
+
+  .cortina{padding:12px}
+  .modal{max-width:100%}
+  .modal-cab{padding:14px 16px}
+  .modal-corpo{padding:14px 16px}
+  .modal-pe{padding:12px 16px;flex-wrap:wrap}
+  .modal-pe .btn{flex:1 1 auto}
+
+  .secao-grupo-metricas{gap:14px 18px;width:100%;justify-content:space-between}
+  .secao-grupo-titulo{width:100%}
+
+  .recibos{left:12px;right:12px;bottom:12px;max-width:none}
+
+  .painel-cab{padding:12px 14px}
+  .painel-corpo{padding:14px}
+}
+
+@media (max-width:480px){
+  .acesso{padding:20px 14px}
+  .cedula-corpo{padding:18px}
+  .grade{grid-template-columns:1fr!important}
+  .campo{margin-bottom:12px}
+  .cabecalho-corpo{align-items:stretch}
+  .acoes-cab{width:100%}
+  .acoes-cab .btn{flex:1 1 auto}
+  .secao-grupo-metricas{justify-content:space-between}
+  .secao-grupo-metricas .item{text-align:left}
+  td .classe{white-space:normal}
+  .modal-pe{flex-direction:column-reverse}
+  .modal-pe .btn{width:100%}
 }
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 

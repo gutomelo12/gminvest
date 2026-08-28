@@ -16,6 +16,7 @@ import Cotacoes from './telas/Cotacoes'
 // a leitura de planilhas carrega a SheetJS; só baixa quando a tela é aberta
 const ImportarB3 = lazy(() => import('./telas/ImportarB3'))
 import Ajustes, { SeletorCarteiras } from './telas/Ajustes'
+import Ajuda from './telas/Ajuda'
 
 const ICONES = {
   resumo:    'M3 13h4v6H3zM10 5h4v14h-4zM17 9h4v10h-4z',
@@ -27,6 +28,7 @@ const ICONES = {
   cotacoes:  'M3 17l6-6 4 4 7-7M21 8v5h-5',
   b3:        'M12 3v12m0 0l-4-4m4 4l4-4M4 19h16',
   ajustes:   'M12 15a3 3 0 100-6 3 3 0 000 6zM4 12h2m12 0h2M12 4v2m0 12v2',
+  ajuda:     'M12 17h.01M9.5 9a2.5 2.5 0 115 0c0 1.5-2.5 2-2.5 3.5M12 21a9 9 0 100-18 9 9 0 000 18z',
 }
 const TELAS = {
   resumo:    'Resumo',
@@ -38,6 +40,7 @@ const TELAS = {
   cotacoes:  'Cotações',
   b3:        'Importações',
   ajustes:   'Ajustes',
+  ajuda:     'Ajuda',
 }
 
 export default function App() {
@@ -126,6 +129,7 @@ function Interior() {
       : `Todos os ${t.ativos} ativos têm cotação registrada`,
     b3: 'Extratos da B3 em planilha, ou notas da Nomad em PDF',
     ajustes: d.carteira?.nome || '',
+    ajuda: 'Por onde começar, e o que cada tela faz',
   }
 
   const acoes = {
@@ -148,6 +152,7 @@ function Interior() {
     cotacoes: <Cotacoes ir={ir} />,
     b3: <Suspense fallback={<div className="carregando">Carregando o leitor de planilhas…</div>}><ImportarB3 ir={ir} /></Suspense>,
     ajustes: <Ajustes />,
+    ajuda: <Ajuda ir={ir} />,
   }[tela]
 
   return (
