@@ -6,6 +6,29 @@ import { paraNumero } from './formato'
  * o motivo explica qual premissa está faltando, em vez de mostrar zero.
  */
 
+/**
+ * Gordon Ajustado — monta a taxa exigida do Gordon a partir de uma taxa
+ * livre de risco (o rendimento de um Tesouro de referência) mais um
+ * prêmio de risco, em vez de pedir um número solto. O resultado ainda
+ * alimenta o mesmo `gordon()` de sempre — só a forma de chegar em K muda.
+ *
+ * Tijolo usa o Tesouro IPCA+ (uma taxa real: aluguel reajusta com
+ * inflação, então o crescimento do dividendo também é pensado em termos
+ * reais). Papel, FOF e Fiagro usam o Tesouro Prefixado, porque a renda
+ * desses fundos já embute a inflação dentro do próprio dividendo — somar
+ * uma taxa real a um fluxo que já é nominal dá conta errada.
+ *
+ * IR é descontado da taxa livre por padrão: dividendo de FII não paga
+ * imposto para pessoa física, então comparar com um Tesouro líquido de
+ * IR é a comparação justa.
+ */
+export function taxaGordonAjustado({ taxa_livre_risco, premio_risco, ajustar_ir, aliquota_ir }) {
+  const livre = paraNumero(taxa_livre_risco)
+  const premio = paraNumero(premio_risco)
+  const aliquota = ajustar_ir ? paraNumero(aliquota_ir) / 100 : 0
+  return livre * (1 - aliquota) + premio
+}
+
 export const MODELOS = {
   bazin: {
     nome: 'Bazin',
@@ -18,6 +41,10 @@ export const MODELOS = {
     resumo: 'Valor intrínseco a partir de lucro e patrimônio, no limite clássico de P/L 15 e P/VP 1,5.',
     formula: '√(22,5 × LPA × VPA)',
     precisa: ['lpa', 'vpa'],
+    // a constante 22,5 vem de múltiplos típicos de ação (P/L 15 × P/VP 1,5);
+    // FII não tem "lucro por cota" no sentido de uma empresa, então esse
+    // número não representa nada ali — por isso fica fora do padrão de FII.
+    naoRecomendadoPara: ['FII'],
   },
   gordon: {
     nome: 'Gordon',
@@ -25,7 +52,19 @@ export const MODELOS = {
     formula: 'DPA × (1 + g) ÷ (k − g)',
     precisa: ['dpa', 'taxa_exigida', 'crescimento'],
   },
+  vp_teto: {
+    nome: 'P/VP máximo',
+    resumo: 'Teto pelo patrimônio — não pagar acima de um múltiplo do valor patrimonial por cota.',
+    formula: 'VPA × P/VP máximo',
+    precisa: ['vpa', 'pvp_maximo'],
+  },
 }
+
+/** Modelos usados por padrão quando ainda não há premissa salva, por classe. */
+export const MODELOS_PADRAO_POR_CLASSE = {
+  FII: ['bazin', 'gordon', 'vp_teto'],
+}
+export const MODELOS_PADRAO = ['bazin', 'graham', 'gordon']
 
 export function bazin({ dpa, yield_exigido }) {
   const d = paraNumero(dpa), y = paraNumero(yield_exigido) / 100
@@ -48,16 +87,28 @@ export function gordon({ dpa, taxa_exigida, crescimento }) {
   return { ok: true, valor: d * (1 + g) / (k - g) }
 }
 
-const FUNCOES = { bazin, graham, gordon }
+export function vp_teto({ vpa, pvp_maximo }) {
+  const v = paraNumero(vpa), m = paraNumero(pvp_maximo)
+  if (v <= 0) return { ok: false, motivo: 'Informe o valor patrimonial por cota (VPA).' }
+  if (m <= 0) return { ok: false, motivo: 'O P/VP máximo precisa ser maior que zero.' }
+  return { ok: true, valor: v * m }
+}
+
+const FUNCOES = { bazin, graham, gordon, vp_teto }
 
 /**
  * Roda os modelos escolhidos e resume numa faixa.
  * A margem de segurança desconta do teto — ela é o quanto você quer
  * errar e ainda estar certo.
+ *
+ * `classe` só decide o PADRÃO de modelos quando a premissa ainda não
+ * escolheu nenhum de propósito — uma vez que a pessoa marca ou desmarca
+ * um modelo à mão, essa escolha manda, não a classe.
  */
-export function avaliar(premissas, precoAtual) {
+export function avaliar(premissas, precoAtual, classe) {
   const p = premissas || {}
-  const metodos = (p.metodos && p.metodos.length) ? p.metodos : ['bazin', 'graham', 'gordon']
+  const padrao = MODELOS_PADRAO_POR_CLASSE[classe] || MODELOS_PADRAO
+  const metodos = (p.metodos && p.metodos.length) ? p.metodos : padrao
   const margem = paraNumero(p.margem) / 100
 
   const resultados = metodos.map(m => {

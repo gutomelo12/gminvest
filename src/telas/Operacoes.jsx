@@ -17,6 +17,8 @@ const rotuloTipo = t => (TIPOS.find(x => x[0] === t) || [, t])[1]
 export default function Operacoes({ ir, editando, setEditando }) {
   const { operacoes, mapaDetalhesRF, podeEscrever } = useDados()
   const [f, setF] = useState({ texto: '', tipo: '', ano: '' })
+  const [pagina, setPagina] = useState(0)
+  const POR_PAGINA = 30
 
   const ops = useMemo(() => [...operacoes].sort((a, b) =>
     b.data.localeCompare(a.data) || String(b.criado_em).localeCompare(String(a.criado_em))), [operacoes])
@@ -28,6 +30,12 @@ export default function Operacoes({ ir, editando, setEditando }) {
       && (!f.tipo || o.tipo === f.tipo)
       && (!f.ano || o.data.startsWith(f.ano))
   })
+  // se o filtro encolheu a lista e a página guardada não existe mais,
+  // volta pra última válida sozinho, sem precisar de um efeito à parte
+  const totalPaginas = Math.max(1, Math.ceil(filtradas.length / POR_PAGINA))
+  const paginaAtual = Math.min(pagina, totalPaginas - 1)
+  const paginadas = filtradas.slice(paginaAtual * POR_PAGINA, (paginaAtual + 1) * POR_PAGINA)
+  const mudarFiltro = novo => { setF(f2 => ({ ...f2, ...novo })); setPagina(0) }
 
   return (
     <>
@@ -35,12 +43,12 @@ export default function Operacoes({ ir, editando, setEditando }) {
         <div className="painel-cab">
           <div className="filtros">
             <input placeholder="Buscar ativo ou corretora" value={f.texto} style={{ width: 210 }}
-              onChange={e => setF({ ...f, texto: e.target.value })} />
-            <select value={f.tipo} onChange={e => setF({ ...f, tipo: e.target.value })}>
+              onChange={e => mudarFiltro({ texto: e.target.value })} />
+            <select value={f.tipo} onChange={e => mudarFiltro({ tipo: e.target.value })}>
               <option value="">Todos os tipos</option>
               {TIPOS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
             </select>
-            <select value={f.ano} onChange={e => setF({ ...f, ano: e.target.value })}>
+            <select value={f.ano} onChange={e => mudarFiltro({ ano: e.target.value })}>
               <option value="">Todos os anos</option>
               {anos.map(a => <option key={a}>{a}</option>)}
             </select>
@@ -48,34 +56,47 @@ export default function Operacoes({ ir, editando, setEditando }) {
           <span className="rotulo">{filtradas.length} de {ops.length}</span>
         </div>
         {filtradas.length ? (
-          <div className="rolagem">
-            <table>
-              <thead><tr>
-                <th>Data</th><th>Ativo</th><th>Tipo</th><th>Qtd.</th><th>Preço</th>
-                <th>Taxas</th><th>Total</th><th style={{ textAlign: 'center' }}>Corretora</th><th /></tr></thead>
-              <tbody>{filtradas.map(o => {
-                const cor = o.tipo === 'venda' ? 'var(--vermelho)' : o.tipo === 'compra' ? 'var(--azul)' : 'var(--ambar)'
-                const semPreco = SEM_PRECO.includes(o.tipo)
-                const det = mapaDetalhesRF[o.id]
-                return (
-                  <tr key={o.id}>
-                    <td className="n">{fmtData(o.data)}</td>
-                    <td>
-                      <span className="ticker">{o.ticker}</span>
-                      <span className="classe">{det ? `${det.subtipo} · ${det.emissor}` : o.classe}</span>
-                    </td>
-                    <td><span className="tag" style={{ color: cor, borderColor: cor }}>{rotuloTipo(o.tipo)}</span></td>
-                    <td className="n">{fmtQtd(o.quantidade)}</td>
-                    <td className="n">{semPreco ? '—' : fmtNum(o.preco, 4)}</td>
-                    <td className={'n ' + (paraNumero(o.taxas) ? '' : 'nulo')}>{paraNumero(o.taxas) ? fmtNum(o.taxas) : '—'}</td>
-                    <td className="n">{semPreco ? '—' : fmtBRL(Math.abs(o.quantidade) * o.preco)}</td>
-                    <td style={{ textAlign: 'center', fontSize: 12, color: 'var(--tinta-3)' }}>{o.corretora || '—'}</td>
-                    <td>{podeEscrever && <button className="btn mini vazio" onClick={() => setEditando(o)}>Editar</button>}</td>
-                  </tr>
-                )
-              })}</tbody>
-            </table>
-          </div>
+          <>
+            <div className="rolagem">
+              <table>
+                <thead><tr>
+                  <th>Data</th><th>Ativo</th><th>Tipo</th><th>Qtd.</th><th>Preço</th>
+                  <th>Taxas</th><th>Total</th><th style={{ textAlign: 'center' }}>Corretora</th><th /></tr></thead>
+                <tbody>{paginadas.map(o => {
+                  const cor = o.tipo === 'venda' ? 'var(--vermelho)' : o.tipo === 'compra' ? 'var(--azul)' : 'var(--ambar)'
+                  const semPreco = SEM_PRECO.includes(o.tipo)
+                  const det = mapaDetalhesRF[o.id]
+                  return (
+                    <tr key={o.id}>
+                      <td className="n">{fmtData(o.data)}</td>
+                      <td>
+                        <span className="ticker">{o.ticker}</span>
+                        <span className="classe">{det ? `${det.subtipo} · ${det.emissor}` : o.classe}</span>
+                      </td>
+                      <td><span className="tag" style={{ color: cor, borderColor: cor }}>{rotuloTipo(o.tipo)}</span></td>
+                      <td className="n">{fmtQtd(o.quantidade)}</td>
+                      <td className="n">{semPreco ? '—' : fmtNum(o.preco, 4)}</td>
+                      <td className={'n ' + (paraNumero(o.taxas) ? '' : 'nulo')}>{paraNumero(o.taxas) ? fmtNum(o.taxas) : '—'}</td>
+                      <td className="n">{semPreco ? '—' : fmtBRL(Math.abs(o.quantidade) * o.preco)}</td>
+                      <td style={{ textAlign: 'center', fontSize: 12, color: 'var(--tinta-3)' }}>{o.corretora || '—'}</td>
+                      <td>{podeEscrever && <button className="btn mini vazio" onClick={() => setEditando(o)}>Editar</button>}</td>
+                    </tr>
+                  )
+                })}</tbody>
+              </table>
+            </div>
+            {totalPaginas > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '14px 16px' }}>
+                <button className="btn mini vazio" disabled={paginaAtual === 0} onClick={() => setPagina(paginaAtual - 1)}>
+                  ‹ Anterior
+                </button>
+                <span className="rotulo">Página {paginaAtual + 1} de {totalPaginas}</span>
+                <button className="btn mini vazio" disabled={paginaAtual >= totalPaginas - 1} onClick={() => setPagina(paginaAtual + 1)}>
+                  Próxima ›
+                </button>
+              </div>
+            )}
+          </>
         ) : (
           <Vazio>
             <p>{ops.length ? 'Nenhum lançamento com esses filtros.'

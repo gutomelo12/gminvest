@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useDados } from '../ctx/Dados'
-import { Painel, Vazio, Modal, useRecibo } from '../comp/base'
+import { Painel, Vazio, Modal, Seta, useRecibo } from '../comp/base'
 import { fmtBRL, fmtMoeda, fmtNum, fmtQtd, fmtPct, fmtPctSimples, fmtData, sinal, corClasseEfetiva, LISTA_CLASSES } from '../lib/formato'
 import { avaliar, ROTULO_SITUACAO } from '../lib/teto'
 
@@ -11,15 +11,8 @@ const COLS = [
   ['fatia', '% carteira'],
 ]
 
-const Seta = ({ aberta }) => (
-  <svg className={'seta-grupo' + (aberta ? ' aberta' : '')} width="11" height="11" viewBox="0 0 24 24"
-    fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M9 6l6 6-6 6" />
-  </svg>
-)
-
 function LinhaPosicao({ p, premissas, mostrarClasse = true, aoClicar }) {
-  const av = avaliar(premissas.find(x => x.ticker === p.ticker), p.precoAtual)
+  const av = avaliar(premissas.find(x => x.ticker === p.ticker), p.precoAtual, p.classe)
   const rot = ROTULO_SITUACAO[av.situacao]
   return (
     <tr style={{ cursor: 'pointer' }} onClick={aoClicar}>
@@ -233,7 +226,7 @@ function DetalheAtivo({ posicao: p, aoFechar, ir }) {
   const recibo = useRecibo()
   const ops = operacoes.filter(o => o.ticker === p.ticker).sort((a, b) => b.data.localeCompare(a.data))
   const pvs = proventos.filter(o => o.ticker === p.ticker).sort((a, b) => b.data.localeCompare(a.data))
-  const av = avaliar(premissas.find(x => x.ticker === p.ticker), p.precoAtual)
+  const av = avaliar(premissas.find(x => x.ticker === p.ticker), p.precoAtual, p.classe)
   const rot = ROTULO_SITUACAO[av.situacao]
 
   return (

@@ -23,6 +23,18 @@ export function ProvedorDados({ children }) {
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState(null)
   const [statusAuto, setStatusAuto] = useState('ocioso')   // ocioso | buscando | ok | erro
+  // segmento sugerido por ticker, compartilhado entre todas as carteiras —
+  // ao contrário de cotação, isso quase nunca muda, então busca uma vez
+  // por sessão, não a cada troca de carteira
+  const [segmentosPadrao, setSegmentosPadrao] = useState({})
+
+  useEffect(() => {
+    if (!usuario) { setSegmentosPadrao({}); return }
+    sb.from('segmentos_padrao').select('ticker, segmento').then(({ data, error }) => {
+      if (error) return // sem essa lista, a tela simplesmente não sugere nada — não é crítico
+      setSegmentosPadrao(Object.fromEntries((data || []).map(r => [r.ticker, r.segmento])))
+    })
+  }, [usuario])
 
   /* --- lista de carteiras a que a pessoa tem acesso --- */
   const recarregarCarteiras = useCallback(async () => {
@@ -528,6 +540,18 @@ export function ProvedorDados({ children }) {
       if (error) throw error
       await recarregar()
     },
+    /**
+     * Mediana das premissas de outras carteiras para o mesmo ativo — nunca
+     * uma linha identificável, só o número agregado. A sua carteira nunca
+     * entra na própria conta.
+     */
+    async premissasDaComunidade(ticker) {
+      const { data, error } = await sb.rpc('premissas_da_comunidade', {
+        p_ticker: ticker, p_carteira_id: carteiraId,
+      })
+      if (error) throw error
+      return data?.[0] || null
+    },
 
     /** Define o segmento de um ativo (Bancos, Energia…), dentro da classe dele. */
     async salvarSegmento(ticker, segmento) {
@@ -569,7 +593,7 @@ export function ProvedorDados({ children }) {
 
   const valor = {
     carteiras, carteira, carteiraId, trocarCarteira, recarregarCarteiras,
-    ...conteudo, mapaCotacoes, mapaClasses, mapaSegmentos, mapaDetalhesRF, mapaCoresClasse, taxasCambio, calc, carregando, erro, recarregar,
+    ...conteudo, mapaCotacoes, mapaClasses, mapaSegmentos, segmentosPadrao, mapaDetalhesRF, mapaCoresClasse, taxasCambio, calc, carregando, erro, recarregar,
     ultimaAtualizacaoCotacoes, statusAuto, precisaCotar,
     podeEscrever, eDono, ...api,
   }

@@ -141,7 +141,7 @@ export function melhoresAtivosDaClasse(ativos, premissas, alvosPorAtivo) {
 
   return ativos.map(p => {
     const prem = premissas.find(x => x.ticker === p.ticker)
-    const av = avaliar(prem, p.precoAtual)
+    const av = avaliar(prem, p.precoAtual, p.classe)
     const alvoPct = mapaAlvo[p.ticker]
     const fatiaNaClasse = totalClasse > 0 ? p.valorAtual / totalClasse * 100 : 0
     // positivo = está abaixo do próprio alvo individual, ou seja, merece aporte

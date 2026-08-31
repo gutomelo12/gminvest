@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
 import { buscarNoServidor } from '../lib/cotacoes'
 import { useDados } from '../ctx/Dados'
-import { Painel, Vazio, Modal, useRecibo } from '../comp/base'
-import { avaliar, MODELOS, ROTULO_SITUACAO, dpaPelosProventos } from '../lib/teto'
+import { Painel, Vazio, Modal, Ponto, useRecibo } from '../comp/base'
+import { avaliar, MODELOS, MODELOS_PADRAO, MODELOS_PADRAO_POR_CLASSE, ROTULO_SITUACAO, dpaPelosProventos, taxaGordonAjustado } from '../lib/teto'
 import { fmtBRL, fmtNum, fmtPctSimples, fmtPct, paraNumero, CLASSES_TETO } from '../lib/formato'
 
 const PADRAO = {
   dpa: '', lpa: '', vpa: '',
-  yield_exigido: 6, taxa_exigida: 10, crescimento: 3, margem: 0,
-  metodos: ['bazin', 'graham', 'gordon'], nota: '',
+  yield_exigido: 6, taxa_exigida: 10, crescimento: 3, margem: 0, pvp_maximo: 1.1,
+  tipo_fii: 'tijolo', taxa_livre_risco: '', premio_risco: 2, ajustar_ir: true, aliquota_ir: 15,
+  metodos: [], nota: '',
 }
 
 export default function PrecoTeto({ focoTicker, limparFoco }) {
@@ -16,6 +17,12 @@ export default function PrecoTeto({ focoTicker, limparFoco }) {
   const [editando, setEditando] = useState(null)
 
   const elegiveis = calc.abertas.filter(p => CLASSES_TETO.includes(p.classe))
+  const porClasse = (() => {
+    const m = new Map()
+    elegiveis.forEach(p => { (m.get(p.classe) || m.set(p.classe, []).get(p.classe)).push(p) })
+    return [...m.entries()].sort((a, b) =>
+      b[1].reduce((s, p) => s + p.valorAtual, 0) - a[1].reduce((s, p) => s + p.valorAtual, 0))
+  })()
 
   useEffect(() => {
     if (!focoTicker) return
@@ -35,7 +42,7 @@ export default function PrecoTeto({ focoTicker, limparFoco }) {
 
   return (
     <>
-      <Painel titulo="Como funciona" aoLado="três modelos, uma faixa">
+      <Painel titulo="Como funciona" aoLado="quatro modelos, uma faixa">
         <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))' }}>
           {Object.entries(MODELOS).map(([k, m]) => (
             <div key={k}>
@@ -50,6 +57,10 @@ export default function PrecoTeto({ focoTicker, limparFoco }) {
           segurança descontada. A faixa entre o menor e o maior mostra o quanto os métodos discordam — quando
           eles divergem muito, é sinal de que alguma premissa merece uma segunda olhada.
         </div>
+        <div className="aviso atencao" style={{ marginTop: 10 }}>
+          Este cálculo é uma referência, não uma recomendação de investimento. Premissas diferentes geram
+          resultados diferentes. Avalie usando múltiplos critérios.
+        </div>
       </Painel>
 
       <BuscarFundamentos elegiveis={elegiveis} />
@@ -63,41 +74,52 @@ export default function PrecoTeto({ focoTicker, limparFoco }) {
       )}
 
       <Painel titulo="Preço teto por ativo" aoLado={`${elegiveis.length} ativo${elegiveis.length === 1 ? '' : 's'}`} corpo={false}>
-        <div className="rolagem">
-          <table>
-            <thead><tr>
-              <th>Ativo</th><th>Cotação</th><th>Preço médio</th>
-              <th>Bazin</th><th>Graham</th><th>Gordon</th>
-              <th>Teto</th><th>Margem p/ teto</th><th>Situação</th><th />
-            </tr></thead>
-            <tbody>{elegiveis.map(p => {
-              const prem = premissas.find(x => x.ticker === p.ticker)
-              const av = avaliar(prem, p.precoAtual)
-              const val = m => {
-                const r = av.resultados.find(x => x.metodo === m)
-                if (!r) return <span className="nulo">—</span>
-                return r.ok ? fmtNum(r.comMargem) : <span className="nulo" title={r.motivo}>—</span>
-              }
-              const rot = ROTULO_SITUACAO[av.situacao]
-              return (
-                <tr key={p.ticker}>
-                  <td><span className="ticker">{p.ticker}</span><span className="classe">{p.classe}</span></td>
-                  <td className={'n ' + (p.temCotacao ? '' : 'nulo')}>{fmtNum(p.precoAtual)}</td>
-                  <td className="n">{fmtNum(p.precoMedio)}</td>
-                  <td className="n">{val('bazin')}</td>
-                  <td className="n">{val('graham')}</td>
-                  <td className="n">{val('gordon')}</td>
-                  <td className="n"><strong>{av.teto ? fmtNum(av.teto) : '—'}</strong></td>
-                  <td className={'n ' + (av.desconto == null ? 'nulo' : av.desconto >= 0 ? 'pos' : 'neg')}>
-                    {av.desconto == null ? '—' : fmtPct(av.desconto, 1)}
-                  </td>
-                  <td><span className="tag" style={{ color: rot.cor, borderColor: rot.cor }}>{rot.texto}</span></td>
-                  <td><button className="btn mini vazio" onClick={() => setEditando(p)}>Premissas</button></td>
-                </tr>
-              )
-            })}</tbody>
-          </table>
-        </div>
+        {porClasse.map(([classe, itens]) => (
+          <div key={classe} style={{ borderTop: classe === porClasse[0][0] ? 'none' : '1px solid var(--linha-2)' }}>
+            <div style={{ padding: '10px 16px', background: 'var(--cedula-3)', display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ display: 'flex', alignItems: 'center', fontSize: 16, fontWeight: 600, color: 'var(--tinta)' }}>
+                <Ponto classe={classe} />{classe}
+              </span>
+              <span className="rotulo" style={{ paddingBottom: 0 }}>· {itens.length} ativo{itens.length === 1 ? '' : 's'}</span>
+            </div>
+            <div className="rolagem">
+              <table style={{ tableLayout: 'fixed' }}>
+                <thead><tr>
+                  <th style={{ width: 90 }}>Ativo</th><th style={{ width: 90 }}>Cotação</th><th style={{ width: 100 }}>Preço médio</th>
+                  <th style={{ width: 80 }}>Bazin</th><th style={{ width: 80 }}>Graham</th><th style={{ width: 80 }}>Gordon</th><th style={{ width: 80 }}>P/VP</th>
+                  <th style={{ width: 90 }}>Teto</th><th style={{ width: 110 }}>Margem p/ teto</th><th style={{ width: 130 }}>Situação</th><th style={{ width: 100 }} />
+                </tr></thead>
+                <tbody>{itens.map(p => {
+                  const prem = premissas.find(x => x.ticker === p.ticker)
+                  const av = avaliar(prem, p.precoAtual, p.classe)
+                  const val = m => {
+                    const r = av.resultados.find(x => x.metodo === m)
+                    if (!r) return <span className="nulo">—</span>
+                    return r.ok ? fmtNum(r.comMargem) : <span className="nulo" title={r.motivo}>—</span>
+                  }
+                  const rot = ROTULO_SITUACAO[av.situacao]
+                  return (
+                    <tr key={p.ticker}>
+                      <td><span className="ticker">{p.ticker}</span></td>
+                      <td className={'n ' + (p.temCotacao ? '' : 'nulo')}>{fmtNum(p.precoAtual)}</td>
+                      <td className="n">{fmtNum(p.precoMedio)}</td>
+                      <td className="n">{val('bazin')}</td>
+                      <td className="n">{val('graham')}</td>
+                      <td className="n">{val('gordon')}</td>
+                      <td className="n">{val('vp_teto')}</td>
+                      <td className="n"><strong>{av.teto ? fmtNum(av.teto) : '—'}</strong></td>
+                      <td className={'n ' + (av.desconto == null ? 'nulo' : av.desconto >= 0 ? 'pos' : 'neg')}>
+                        {av.desconto == null ? '—' : fmtPct(av.desconto, 1)}
+                      </td>
+                      <td><span className="tag" style={{ color: rot.cor, borderColor: rot.cor }}>{rot.texto}</span></td>
+                      <td><button className="btn mini vazio" onClick={() => setEditando(p)}>Premissas</button></td>
+                    </tr>
+                  )
+                })}</tbody>
+              </table>
+            </div>
+          </div>
+        ))}
       </Painel>
 
       {editando && <FormPremissas posicao={editando} aoFechar={() => setEditando(null)} />}
@@ -106,20 +128,35 @@ export default function PrecoTeto({ focoTicker, limparFoco }) {
 }
 
 function FormPremissas({ posicao: p, aoFechar }) {
-  const { premissas, proventos, salvarPremissas, apagarPremissas, podeEscrever } = useDados()
+  const { premissas, proventos, salvarPremissas, apagarPremissas, premissasDaComunidade, podeEscrever } = useDados()
   const recibo = useRecibo()
   const existente = premissas.find(x => x.ticker === p.ticker)
+  const eFundo = p.classe === 'FII'
+  const modelosPadraoDaClasse = MODELOS_PADRAO_POR_CLASSE[p.classe] || MODELOS_PADRAO
   const [v, setV] = useState(() => ({
     ...PADRAO,
     ...(existente || {}),
-    metodos: existente?.metodos?.length ? existente.metodos : PADRAO.metodos,
+    metodos: existente?.metodos?.length ? existente.metodos : modelosPadraoDaClasse,
   }))
   const [erro, setErro] = useState(null)
+  const [comunidade, setComunidade] = useState(null)
+
+  useEffect(() => {
+    let vivo = true
+    premissasDaComunidade(p.ticker).then(r => { if (vivo) setComunidade(r) }).catch(() => {})
+    return () => { vivo = false }
+  }, [p.ticker])
 
   const num = { ...v, dpa: paraNumero(v.dpa), lpa: paraNumero(v.lpa), vpa: paraNumero(v.vpa) }
-  const av = avaliar(num, p.precoAtual)
+  const usaBazin = v.metodos.includes('bazin')
+  const usaGraham = v.metodos.includes('graham')
+  const usaGordon = v.metodos.includes('gordon')
+  const usaVpTeto = v.metodos.includes('vp_teto')
+  // para FII, a taxa exigida do Gordon não é digitada direto — é a soma da
+  // taxa livre de risco (líquida de IR, se marcado) com o prêmio de risco
+  const taxaExigidaEfetiva = eFundo ? taxaGordonAjustado(v) : paraNumero(v.taxa_exigida)
+  const av = avaliar({ ...num, taxa_exigida: taxaExigidaEfetiva }, p.precoAtual, p.classe)
   const rot = ROTULO_SITUACAO[av.situacao]
-  const eFundo = p.classe === 'FII'
 
   const campo = (k, x) => setV(s => ({ ...s, [k]: x }))
   const alternar = m => setV(s => ({
@@ -138,9 +175,16 @@ function FormPremissas({ posicao: p, aoFechar }) {
       await salvarPremissas({
         ticker: p.ticker,
         dpa: paraNumero(v.dpa) || null, lpa: paraNumero(v.lpa) || null, vpa: paraNumero(v.vpa) || null,
-        yield_exigido: paraNumero(v.yield_exigido), taxa_exigida: paraNumero(v.taxa_exigida),
+        yield_exigido: paraNumero(v.yield_exigido), taxa_exigida: taxaExigidaEfetiva,
         crescimento: paraNumero(v.crescimento), margem: paraNumero(v.margem),
+        pvp_maximo: paraNumero(v.pvp_maximo),
+        tipo_fii: eFundo ? v.tipo_fii : null,
+        taxa_livre_risco: eFundo ? paraNumero(v.taxa_livre_risco) || null : null,
+        premio_risco: eFundo ? paraNumero(v.premio_risco) : null,
+        ajustar_ir: eFundo ? Boolean(v.ajustar_ir) : null,
+        aliquota_ir: eFundo ? paraNumero(v.aliquota_ir) : null,
         metodos: v.metodos, nota: v.nota || null,
+        teto_calculado: av.teto,
         // salvar pelo formulário marca como conferido à mão, e a busca
         // automática passa a respeitar esses números
         origem: 'manual',
@@ -161,7 +205,7 @@ function FormPremissas({ posicao: p, aoFechar }) {
       <button className="btn vazio" onClick={aoFechar}>Fechar</button>
       {podeEscrever && <button className="btn verde" onClick={salvar}>Salvar</button>}
     </>}>
-      <div className="duas" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,300px)' }}>
+      <div className="duas duas-flex-260">
         <div>
           <div className="rotulo" style={{ marginBottom: 10 }}>Modelos aplicados</div>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 18 }}>
@@ -169,43 +213,109 @@ function FormPremissas({ posicao: p, aoFechar }) {
               <label key={k} className="linha-cheque">
                 <input type="checkbox" checked={v.metodos.includes(k)} onChange={() => alternar(k)} />
                 {m.nome}
+                {m.naoRecomendadoPara?.includes(p.classe) && <span className="nulo"> (não recomendado)</span>}
               </label>
             ))}
           </div>
 
-          <div className="grade">
-            <label className="campo">
-              <span className="rotulo">DPA — dividendo por {eFundo ? 'cota' : 'ação'}</span>
-              <input type="number" step="any" value={v.dpa} onChange={e => campo('dpa', e.target.value)} />
-              <span className="dica">
-                {eFundo ? 'Some os rendimentos dos últimos 12 meses por cota.' : 'Média dos últimos 5 anos costuma alisar bem.'}{' '}
-                <button className="btn mini vazio" style={{ marginTop: 5 }} onClick={estimarDPA} type="button">
-                  Estimar pelos meus proventos
-                </button>
-              </span>
-            </label>
-            <label className="campo">
-              <span className="rotulo">LPA — lucro por {eFundo ? 'cota' : 'ação'}</span>
-              <input type="number" step="any" value={v.lpa} onChange={e => campo('lpa', e.target.value)} />
-              <span className="dica">Usado só por Graham.</span>
-            </label>
-            <label className="campo">
-              <span className="rotulo">VPA — valor patrimonial</span>
-              <input type="number" step="any" value={v.vpa} onChange={e => campo('vpa', e.target.value)} />
-              <span className="dica">{eFundo ? 'O VP por cota do último relatório gerencial.' : 'Patrimônio líquido dividido pelas ações.'}</span>
-            </label>
-          </div>
+          {(usaBazin || usaGordon) && (
+            <div className="grade">
+              <label className="campo">
+                <span className="rotulo">DPA</span>
+                <input type="number" step="any" value={v.dpa} onChange={e => campo('dpa', e.target.value)} />
+                <span className="dica">
+                  Dividendo por {eFundo ? 'cota' : 'ação'}. <button className="btn mini vazio" onClick={estimarDPA} type="button">Estimar pelos meus proventos</button>
+                </span>
+              </label>
+              {usaBazin && (
+                <label className="campo"><span className="rotulo">Yield exigido (%)</span>
+                  <input type="number" step="any" value={v.yield_exigido} onChange={e => campo('yield_exigido', e.target.value)} />
+                  <span className="dica">Bazin. O clássico é 6%.</span></label>
+              )}
+              {usaGordon && !eFundo && (<>
+                <label className="campo"><span className="rotulo">Taxa exigida (%)</span>
+                  <input type="number" step="any" value={v.taxa_exigida} onChange={e => campo('taxa_exigida', e.target.value)} />
+                  <span className="dica">Gordon. Seu retorno mínimo aceitável.</span></label>
+                <label className="campo"><span className="rotulo">Crescimento (%)</span>
+                  <input type="number" step="any" value={v.crescimento} onChange={e => campo('crescimento', e.target.value)} />
+                  <span className="dica">Gordon. Precisa ser menor que a taxa.</span></label>
+              </>)}
+            </div>
+          )}
+
+          {usaGordon && eFundo && (
+            <div style={{ marginBottom: 18 }}>
+              <div className="rotulo" style={{ marginBottom: 8 }}>Gordon Ajustado — taxa exigida composta</div>
+              <div className="grade" style={{ marginBottom: 0 }}>
+                <label className="campo"><span className="rotulo">Tipo de FII</span>
+                  <select value={v.tipo_fii} onChange={e => campo('tipo_fii', e.target.value)}>
+                    <option value="tijolo">Tijolo</option>
+                    <option value="papel">Papel, FOF ou Fiagro</option>
+                  </select>
+                  <span className="dica">Muda a taxa de referência ao lado.</span>
+                </label>
+                <label className="campo">
+                  <span className="rotulo">Taxa livre (%)</span>
+                  <input type="number" step="any" value={v.taxa_livre_risco} onChange={e => campo('taxa_livre_risco', e.target.value)} />
+                  <span className="dica">
+                    {v.tipo_fii === 'tijolo' ? 'Tesouro IPCA+ longo, taxa bruta atual.' : 'Tesouro Prefixado longo, taxa bruta atual.'}
+                  </span>
+                </label>
+                <label className="campo"><span className="rotulo">Prêmio (%)</span>
+                  <input type="number" step="any" value={v.premio_risco} onChange={e => campo('premio_risco', e.target.value)} />
+                  <span className="dica">Soma à taxa livre. 2% é comum.</span></label>
+                <label className="campo"><span className="rotulo">Crescimento (%)</span>
+                  <input type="number" step="any" value={v.crescimento} onChange={e => campo('crescimento', e.target.value)} />
+                  <span className="dica">
+                    {v.tipo_fii === 'tijolo' ? 'Real — acima da inflação. 0% é conservador.' : 'Nominal do dividendo. 0% é conservador.'}
+                  </span></label>
+              </div>
+              <label className="linha-cheque" style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={v.ajustar_ir} onChange={e => campo('ajustar_ir', e.target.checked)} />
+                <span>Descontar IR da taxa livre de risco —</span>
+                {v.ajustar_ir && (
+                  <input type="number" step="any" value={v.aliquota_ir} style={{ width: 60 }}
+                    onChange={e => campo('aliquota_ir', e.target.value)} />
+                )}
+                <span>%</span>
+              </label>
+              <p style={{ fontSize: 12, color: 'var(--tinta-3)', margin: '10px 0 0', lineHeight: 1.5 }}>
+                Para fundos de tijolo, usamos o Tesouro IPCA+ como referência (trabalhando em termos
+                reais). Para fundos de papel, FOFs e Fiagro, usamos o Tesouro Prefixado (a inflação já
+                está embutida no dividendo). Dividendo de FII não paga IR para pessoa física — por isso
+                comparar com a taxa do Tesouro líquida de imposto é a comparação justa.
+              </p>
+              <div className="aviso info" style={{ marginTop: 10 }}>
+                Taxa exigida composta: <strong>{fmtNum(taxaExigidaEfetiva, 2)}%</strong>{' '}
+                ({fmtNum(v.ajustar_ir ? paraNumero(v.taxa_livre_risco) * (1 - paraNumero(v.aliquota_ir) / 100) : paraNumero(v.taxa_livre_risco), 2)}%
+                líquida + {fmtNum(v.premio_risco, 2)}% de prêmio)
+              </div>
+            </div>
+          )}
+
+          {(usaGraham || usaVpTeto) && (
+            <div className="grade">
+              {usaGraham && (
+                <label className="campo">
+                  <span className="rotulo">LPA — lucro por ação</span>
+                  <input type="number" step="any" value={v.lpa} onChange={e => campo('lpa', e.target.value)} />
+                  <span className="dica">Usado só por Graham.</span>
+                </label>
+              )}
+              <label className="campo">
+                <span className="rotulo">VPA — valor patrimonial</span>
+                <input type="number" step="any" value={v.vpa} onChange={e => campo('vpa', e.target.value)} />
+                <span className="dica">{eFundo ? 'VP por cota do último relatório gerencial.' : 'Patrimônio líquido ÷ ações.'}</span>
+              </label>
+              {usaVpTeto && (
+                <label className="campo"><span className="rotulo">P/VP máximo</span>
+                  <input type="number" step="any" value={v.pvp_maximo} onChange={e => campo('pvp_maximo', e.target.value)} />
+                  <span className="dica">{eFundo ? 'Quanto acima do patrimônio aceita pagar. 1,10 é comum.' : 'Teto por P/VP.'}</span></label>
+              )}
+            </div>
+          )}
 
           <div className="grade">
-            <label className="campo"><span className="rotulo">Yield exigido (%)</span>
-              <input type="number" step="any" value={v.yield_exigido} onChange={e => campo('yield_exigido', e.target.value)} />
-              <span className="dica">Bazin. O clássico é 6%.</span></label>
-            <label className="campo"><span className="rotulo">Taxa exigida (%)</span>
-              <input type="number" step="any" value={v.taxa_exigida} onChange={e => campo('taxa_exigida', e.target.value)} />
-              <span className="dica">Gordon. Seu retorno mínimo aceitável.</span></label>
-            <label className="campo"><span className="rotulo">Crescimento (%)</span>
-              <input type="number" step="any" value={v.crescimento} onChange={e => campo('crescimento', e.target.value)} />
-              <span className="dica">Gordon. Precisa ser menor que a taxa.</span></label>
             <label className="campo"><span className="rotulo">Margem de segurança (%)</span>
               <input type="number" step="any" value={v.margem} onChange={e => campo('margem', e.target.value)} />
               <span className="dica">Desconta do teto de todos os modelos.</span></label>
@@ -232,11 +342,11 @@ function FormPremissas({ posicao: p, aoFechar }) {
           </div>
 
           <div className="rotulo" style={{ marginBottom: 8 }}>Modelo a modelo</div>
-          <table>
+          <table style={{ tableLayout: 'fixed' }}>
             <tbody>{av.resultados.map(r => (
               <tr key={r.metodo}>
-                <td style={{ padding: '7px 0' }}>{r.nome}</td>
-                <td className="n" style={{ padding: '7px 0' }}>
+                <td style={{ padding: '7px 0', width: 70, whiteSpace: 'normal' }}>{r.nome}</td>
+                <td className="n" style={{ padding: '7px 0', whiteSpace: 'normal', textAlign: 'left' }}>
                   {r.ok ? <strong>{fmtBRL(r.comMargem)}</strong>
                     : <span className="nulo" style={{ fontSize: 11.5 }}>{r.motivo}</span>}
                 </td>
@@ -247,6 +357,13 @@ function FormPremissas({ posicao: p, aoFechar }) {
           {paraNumero(v.margem) > 0 && av.faixa && (
             <div className="dica" style={{ marginTop: 10 }}>
               Valores já com {fmtPctSimples(paraNumero(v.margem))} de margem descontada.
+            </div>
+          )}
+
+          {comunidade && comunidade.quantidade > 0 && comunidade.menor_teto != null && (
+            <div className="aviso info" style={{ marginTop: 14, fontSize: 12.5 }}>
+              {comunidade.quantidade} outra{comunidade.quantidade === 1 ? '' : 's'} carteira{comunidade.quantidade === 1 ? '' : 's'} no
+              gmINVEST já calculou um teto para {p.ticker} — o mais conservador: <strong>{fmtBRL(comunidade.menor_teto)}</strong>.
             </div>
           )}
         </div>
@@ -290,7 +407,8 @@ function BuscarFundamentos({ elegiveis }) {
           taxa_exigida: atual?.taxa_exigida ?? 10,
           crescimento: atual?.crescimento ?? 3,
           margem: atual?.margem ?? 0,
-          metodos: atual?.metodos?.length ? atual.metodos : ['bazin', 'graham', 'gordon'],
+          metodos: atual?.metodos?.length ? atual.metodos
+            : (MODELOS_PADRAO_POR_CLASSE[elegiveis.find(p => p.ticker === ticker)?.classe] || MODELOS_PADRAO),
           origem: 'yahoo',
           carteira_id: undefined,
         })

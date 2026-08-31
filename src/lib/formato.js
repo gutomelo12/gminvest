@@ -82,6 +82,49 @@ export const CLASSES = {
   'Outro':          '#5A6C63',
 }
 export const LISTA_CLASSES = Object.keys(CLASSES)
+
+/**
+ * Segmentos sugeridos por classe — um ponto de partida, não uma
+ * obrigação. O campo de segmento continua sendo texto livre; isto só
+ * pré-preenche a lista de sugestões com um vocabulário comum, para
+ * padronizar o nome que diferentes pessoas dão ao mesmo tipo de negócio.
+ */
+export const SEGMENTOS_SUGERIDOS = {
+  'Ação': [
+    'Bancos e Serviços Financeiros',
+    'Energia Elétrica',
+    'Petróleo, Gás e Combustíveis',
+    'Mineração e Siderurgia',
+    'Construção e Imobiliário',
+    'Varejo e Consumo',
+    'Alimentos e Bebidas',
+    'Indústria e Bens de Capital',
+    'Tecnologia e Software',
+    'Telecomunicações e Mídia',
+    'Saúde e Farmacêutico',
+    'Transportes e Logística',
+    'Agronegócio e Papel & Celulose',
+    'Utilidades e Serviços Públicos',
+    'Diversificado / Holding',
+  ],
+  'FII': [
+    'Logística',
+    'Shopping Centers',
+    'Lajes Corporativas',
+    'Varejo',
+    'Híbrido',
+    'Renda Urbana',
+    'Residencial',
+    'Hotel',
+    'Agências Bancárias',
+    'Educacional',
+    'Hospitalar',
+    'Industrial',
+    'CRI / Recebíveis',
+    'Fundo de Fundos (FOF)',
+    'Agronegócio / Fiagro',
+  ],
+}
 export const corClasse = c => CLASSES[c] || CLASSES['Outro']
 
 /** Cor efetiva de uma classe — a que a pessoa escolheu em Ajustes, ou a de fábrica. */

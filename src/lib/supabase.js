@@ -50,7 +50,7 @@ export const sb = configurado
   ? createClient(u.url, k.chave, { auth: { persistSession: true, autoRefreshToken: true } })
   : null
 
-if (aviso) console.warn('[gminvest] ' + aviso)
+if (aviso) console.warn('[gmINVEST] ' + aviso)
 
 /**
  * O Supabase descarta o corpo da resposta quando uma função de servidor

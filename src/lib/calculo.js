@@ -226,3 +226,34 @@ export function patrimonioPorMes(historico = [], meses = 12) {
   })
   return saida
 }
+
+/**
+ * Capital aportado acumulado até o fim de cada mês — não é valor de
+ * mercado, é só quanto entrou de dinheiro (compra menos venda, líquido),
+ * reconstruído a partir das próprias operações. Serve para preencher os
+ * meses anteriores a qualquer fotografia de patrimônio, quando não existe
+ * preço histórico disponível de graça para saber quanto a carteira valia
+ * de verdade naquela época — não é o mesmo dado, e por isso o gráfico
+ * precisa desenhar isso de um jeito visualmente diferente do valor real.
+ *
+ * Reaproveita o mesmo `calcular()` de sempre, rodado com o corte de data
+ * de cada mês — não é uma fórmula nova, é o motor de sempre, olhando só
+ * até uma certa data.
+ */
+export function custoAcumuladoPorMes(operacoes = [], classeDoAtivo = {}, taxasCambio = {}, meses = 12) {
+  const ref = new Date()
+  const saida = []
+  for (let i = meses - 1; i >= 0; i--) {
+    const d = new Date(ref.getFullYear(), ref.getMonth() - i, 1)
+    const fimDoMes = new Date(d.getFullYear(), d.getMonth() + 1, 0)
+    const fimStr = `${fimDoMes.getFullYear()}-${String(fimDoMes.getMonth() + 1).padStart(2, '0')}-${String(fimDoMes.getDate()).padStart(2, '0')}`
+    const ateAqui = operacoes.filter(o => String(o.data) <= fimStr)
+    const parcial = calcular(ateAqui, [], {}, classeDoAtivo, taxasCambio)
+    saida.push({
+      ym: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      rotulo: ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][d.getMonth()],
+      valor: parcial.total.custo,
+    })
+  }
+  return saida
+}

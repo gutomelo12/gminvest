@@ -128,10 +128,11 @@ export function Painel({ titulo, aoLado, children, corpo = true }) {
 export const Vazio = ({ children }) => <div className="vazio-estado">{children}</div>
 
 /* ---------- rosca de alocação ---------- */
-export function Rosca({ fatias, total, rotuloCentro }) {
+export function Rosca({ fatias, total }) {
   if (!fatias.length || total <= 0) return <Vazio><p>Sem posições em aberto.</p></Vazio>
-  const R = 78, r = 50, cx = 96, cy = 96
+  const R = 78, r = 50, cx = 96, cy = 96, rMeio = (R + r) / 2
   let ang = -Math.PI / 2
+  const rotulos = []
   const partes = fatias.map(f => {
     const fr = f.valor / total
     const a2 = ang + fr * Math.PI * 2
@@ -140,22 +141,26 @@ export function Rosca({ fatias, total, rotuloCentro }) {
     const d = fr > .9995 ? null
       : `M${P(ang, R)} A${R} ${R} 0 ${grande} 1 ${P(a2, R)} L${P(a2, r)} A${r} ${r} 0 ${grande} 0 ${P(ang, r)} Z`
     const el = d
-      ? <path key={f.chave} d={d} fill={f.cor} stroke="var(--cedula-3)" strokeWidth="1.5"><title>{f.chave}</title></path>
-      : <circle key={f.chave} cx={cx} cy={cy} r={(R + r) / 2} fill="none" stroke={f.cor} strokeWidth={R - r} />
+      ? <path key={f.chave} d={d} fill={f.cor} stroke="var(--cedula-3)" strokeWidth="1.5"><title>{f.chave}: {(fr * 100).toFixed(1).replace('.', ',')}%</title></path>
+      : <circle key={f.chave} cx={cx} cy={cy} r={rMeio} fill="none" stroke={f.cor} strokeWidth={R - r} />
+    // rótulo de porcentagem só nas fatias grandes o bastante pra caber o
+    // número sem virar uma sopa de letrinhas espremidas
+    if (fr > .045) {
+      const angMeio = ang + (a2 - ang) / 2
+      rotulos.push(
+        <text key={'r' + f.chave} x={cx + Math.cos(angMeio) * rMeio} y={cy + Math.sin(angMeio) * rMeio + 3}
+          textAnchor="middle" fontFamily="var(--mono)" fontSize="9.5" fontWeight="600" fill="#fff"
+          style={{ pointerEvents: 'none' }}>{Math.round(fr * 100)}%</text>
+      )
+    }
     ang = a2
     return el
   })
-  const maior = fatias[0]
   return (
     <svg viewBox="0 0 192 192" style={{ width: '100%', maxWidth: 200, display: 'block', margin: '0 auto' }}
       role="img" aria-label="Distribuição por classe">
       {partes}
-      <text x="96" y="90" textAnchor="middle" fontFamily="var(--mono)" fontSize="8.5"
-        letterSpacing="1.4" fill="var(--tinta-3)">{rotuloCentro || 'MAIOR CLASSE'}</text>
-      <text x="96" y="106" textAnchor="middle" fontFamily="var(--serif)"
-        fontSize="15" fontWeight="600" fill="var(--tinta)">{maior.chave}</text>
-      <text x="96" y="120" textAnchor="middle" fontFamily="var(--mono)" fontSize="10"
-        fill="var(--tinta-3)">{(maior.valor / total * 100).toFixed(1).replace('.', ',')}%</text>
+      {rotulos}
     </svg>
   )
 }
@@ -192,6 +197,17 @@ function rotuloValor(v) {
   return Math.round(v).toLocaleString('pt-BR')
 }
 
+/** Arredonda pra um número "redondo" (1, 2 ou 5 × potência de 10) — é o
+ * mesmo truque que qualquer gráfico de verdade usa pra a grade do eixo
+ * cair em 50, 100, 150 em vez de 47, 94, 141. */
+function passoBonito(bruto) {
+  if (bruto <= 0) return 1
+  const exp = Math.pow(10, Math.floor(Math.log10(bruto)))
+  const frac = bruto / exp
+  const bonito = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10
+  return bonito * exp
+}
+
 /**
  * Igual a Colunas na grade, diferente no que faz com a ausência de dado.
  * Em proventos, um mês sem crédito é um zero de verdade. Aqui não: um mês
@@ -214,8 +230,8 @@ export function Evolucao({ dados, formatar }) {
           return (
             <g key={i}>
               <rect x={x} y={H - 25} width={w} height="1.5" fill="var(--linha)" />
-              <text x={x + w / 2} y={H - 9} textAnchor="middle" fontFamily="var(--mono)"
-                fontSize="8.5" fill="var(--tinta-4)">{d.rotulo}</text>
+              <text x={x + w / 2} y={H - 8} textAnchor="middle" fontFamily="var(--mono)"
+                fontSize="9.5" fill="var(--tinta-4)">{d.rotulo}</text>
             </g>
           )
         }
@@ -224,12 +240,13 @@ export function Evolucao({ dados, formatar }) {
         return (
           <g key={i}>
             <text x={x + w / 2} y={y - 4} textAnchor="middle" fontFamily="var(--mono)"
-              fontSize="7.5" fill="var(--tinta-2)">{rotuloValor(d.valor)}</text>
-            <rect x={x} y={y} width={w} height={h} fill="var(--verde)" opacity=".85" rx="1.5">
-              <title>{d.rotulo}: {formatar(d.valor)}</title>
+              fontSize="8.5" fill="var(--tinta-2)">{rotuloValor(d.valor)}</text>
+            <rect x={x} y={y} width={w} height={h}
+              fill={d.estimado ? 'var(--ambar)' : 'var(--verde)'} opacity={d.estimado ? .45 : .85} rx="1.5">
+              <title>{d.rotulo}: {formatar(d.valor)}{d.estimado ? ' (capital aportado, sem cotação histórica)' : ''}</title>
             </rect>
-            <text x={x + w / 2} y={H - 9} textAnchor="middle" fontFamily="var(--mono)"
-              fontSize="8.5" fill="var(--tinta-3)">{d.rotulo}</text>
+            <text x={x + w / 2} y={H - 8} textAnchor="middle" fontFamily="var(--mono)"
+              fontSize="9.5" fill="var(--tinta-3)">{d.rotulo}</text>
           </g>
         )
       })}
@@ -241,25 +258,39 @@ export function Evolucao({ dados, formatar }) {
 export function Colunas({ dados, formatar }) {
   if (!dados.length) return <Vazio><p>Nada registrado ainda.</p></Vazio>
   const max = Math.max(...dados.map(d => d.valor), 0.01)
-  const W = 720, H = 170, pad = 26
-  const larg = (W - pad * 2) / dados.length
+  const W = 720, H = 220, padEsq = 40, padDir = 12, padBaixo = 26, padCima = 28
+  const larg = (W - padEsq - padDir) / dados.length
   const media = dados.reduce((s, d) => s + d.valor, 0) / dados.length
-  const yMedia = H - 24 - (media / max) * (H - 44)
+
+  // grade do eixo: 4 faixas, com o teto arredondado pra cima do maior valor
+  const passo = passoBonito(max / 4 || 1)
+  const teto = Math.max(passo, Math.ceil(max / passo) * passo)
+  const nLinhas = Math.round(teto / passo)
+  const linhasGrade = Array.from({ length: nLinhas + 1 }, (_, i) => passo * i)
+  const yDe = v => H - padBaixo - (v / teto) * (H - padBaixo - padCima)
+
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }} role="img" aria-label="Série mensal">
-      <line x1={pad} y1={yMedia} x2={W - pad} y2={yMedia} stroke="var(--ambar)" strokeWidth="1" strokeDasharray="3 3" />
-      <text x={W - pad} y={yMedia - 5} textAnchor="end" fontFamily="var(--mono)"
+      {linhasGrade.map((v, i) => (
+        <g key={i}>
+          <line x1={padEsq} y1={yDe(v)} x2={W - padDir} y2={yDe(v)} stroke="var(--linha)" strokeWidth="1" />
+          <text x={padEsq - 6} y={yDe(v) + 3} textAnchor="end" fontFamily="var(--mono)"
+            fontSize="8" fill="var(--tinta-4)">{rotuloValor(v)}</text>
+        </g>
+      ))}
+      <line x1={padEsq} y1={yDe(media)} x2={W - padDir} y2={yDe(media)} stroke="var(--ambar)" strokeWidth="1" strokeDasharray="3 3" />
+      <text x={W - padDir} y={yDe(media) - 5} textAnchor="end" fontFamily="var(--mono)"
         fontSize="9" fill="var(--ambar)">média {formatar(media)}</text>
       {dados.map((d, i) => {
-        const h = Math.max(1, (d.valor / max) * (H - 44))
-        const x = pad + i * larg + larg * .18, w = larg * .64, y = H - 24 - h
+        const x = padEsq + i * larg + larg * .18, w = larg * .64
+        const y = yDe(d.valor), h = Math.max(1, H - padBaixo - y)
         return (
           <g key={i}>
             {d.valor > 0 && (
-              <text x={x + w / 2} y={y - 4} textAnchor="middle" fontFamily="var(--mono)"
+              <text x={x + w / 2} y={y - 5} textAnchor="middle" fontFamily="var(--mono)"
                 fontSize="7.5" fill="var(--tinta-2)">{rotuloValor(d.valor)}</text>
             )}
-            <rect x={x} y={y} width={w} height={h} fill="var(--verde)" opacity={d.valor > 0 ? .85 : .2} rx="1.5">
+            <rect x={x} y={y} width={w} height={h} fill="var(--verde)" opacity={d.valor > 0 ? .85 : .2} rx="3">
               <title>{d.rotulo}: {formatar(d.valor)}</title>
             </rect>
             <text x={x + w / 2} y={H - 9} textAnchor="middle" fontFamily="var(--mono)"
@@ -274,6 +305,14 @@ export function Colunas({ dados, formatar }) {
 export const Ponto = ({ classe, cor }) => (
   <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2,
     background: cor || corClasse(classe), marginRight: 6 }} />
+)
+
+/** Seta de acordeão — gira quando o bloco está aberto. */
+export const Seta = ({ aberta }) => (
+  <svg className={'seta-grupo' + (aberta ? ' aberta' : '')} width="11" height="11" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 6l6 6-6 6" />
+  </svg>
 )
 
 export const iniciais = nome => String(nome || '').trim().split(/\s+/).slice(0, 2)

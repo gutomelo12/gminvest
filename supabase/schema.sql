@@ -200,6 +200,7 @@ create table if not exists public.premissas_teto (
   taxa_exigida    numeric(7,4)  default 10,     -- Gordon, em %
   crescimento     numeric(7,4)  default 3,      -- Gordon, em %
   margem          numeric(7,4)  default 0,      -- margem de segurança, em %
+  pvp_maximo      numeric(7,4)  default 1.1,    -- teto por patrimônio, principalmente para FII
   metodos         text[]        default array['bazin','graham','gordon'],
   nota            text,
   atualizado      timestamptz not null default now(),
@@ -561,3 +562,270 @@ end $$;
 drop index if exists public.alocacao_alvo_unico;
 create unique index alocacao_alvo_unico
   on public.alocacao_alvo (carteira_id, nivel, chave, coalesce(classe_pai, ''));
+
+-- ------------------------------------------------------------
+--  Premissas de preço teto — coluna nova para o modelo de teto por P/VP,
+--  pensado principalmente para FII (onde Graham não se aplica).
+-- ------------------------------------------------------------
+alter table public.premissas_teto add column if not exists pvp_maximo numeric(7,4) default 1.1;
+
+-- ------------------------------------------------------------
+--  Comparação anônima de premissas entre carteiras
+--
+--  Só devolve números agregados (mediana, quantidade) de um ticker,
+--  nunca uma linha identificável nem de qual carteira ela veio — é a
+--  única informação no gminvest que atravessa a fronteira normal de
+--  "só quem tem acesso a esta carteira vê o dado desta carteira".
+--  A sua própria carteira fica de fora da conta, para comparar com
+--  "os outros", não consigo mesmo.
+-- ------------------------------------------------------------
+create or replace function public.premissas_da_comunidade(p_ticker text, p_carteira_id uuid)
+returns table(quantidade bigint, mediana_dpa numeric, mediana_lpa numeric, mediana_vpa numeric,
+              mediana_yield numeric, mediana_pvp_maximo numeric)
+language sql security definer set search_path = public as $$
+  select
+    count(*)::bigint,
+    percentile_cont(0.5) within group (order by dpa),
+    percentile_cont(0.5) within group (order by lpa),
+    percentile_cont(0.5) within group (order by vpa),
+    percentile_cont(0.5) within group (order by yield_exigido),
+    percentile_cont(0.5) within group (order by pvp_maximo)
+  from public.premissas_teto
+  where upper(ticker) = upper(p_ticker)
+    and carteira_id <> p_carteira_id
+    and auth.uid() is not null
+$$;
+
+grant execute on function public.premissas_da_comunidade(text, uuid) to authenticated;
+
+-- ------------------------------------------------------------
+--  Gordon Ajustado para FII — a taxa exigida deixa de ser um número
+--  solto e passa a ser composta: taxa livre de risco (o Tesouro que
+--  serve de referência) + prêmio de risco que você escolhe. O valor
+--  somado continua guardado em taxa_exigida, para o motor de cálculo
+--  não precisar saber de onde ele veio.
+-- ------------------------------------------------------------
+alter table public.premissas_teto add column if not exists tipo_fii text check (tipo_fii in ('tijolo','papel'));
+alter table public.premissas_teto add column if not exists taxa_livre_risco numeric(7,4);
+alter table public.premissas_teto add column if not exists premio_risco numeric(7,4) default 2;
+alter table public.premissas_teto add column if not exists ajustar_ir boolean default true;
+alter table public.premissas_teto add column if not exists aliquota_ir numeric(7,4) default 15;
+
+-- ------------------------------------------------------------
+--  Guarda o preço teto já calculado junto da premissa. Cada carteira
+--  pode escolher uma combinação diferente de modelos, então não dá pra
+--  reconstruir um "teto típico" só a partir dos insumos (DPA, VPA...) —
+--  é preciso guardar o resultado final para poder comparar de verdade.
+-- ------------------------------------------------------------
+alter table public.premissas_teto add column if not exists teto_calculado numeric(20,8);
+
+-- o retorno da função mudou (ganhou uma coluna) — "create or replace" não
+-- permite trocar o formato de saída, então precisa apagar e recriar
+drop function if exists public.premissas_da_comunidade(text, uuid);
+
+create function public.premissas_da_comunidade(p_ticker text, p_carteira_id uuid)
+returns table(quantidade bigint, mediana_dpa numeric, mediana_lpa numeric, mediana_vpa numeric,
+              mediana_yield numeric, mediana_pvp_maximo numeric, mediana_teto numeric)
+language sql security definer set search_path = public as $$
+  select
+    count(*)::bigint,
+    percentile_cont(0.5) within group (order by dpa),
+    percentile_cont(0.5) within group (order by lpa),
+    percentile_cont(0.5) within group (order by vpa),
+    percentile_cont(0.5) within group (order by yield_exigido),
+    percentile_cont(0.5) within group (order by pvp_maximo),
+    percentile_cont(0.5) within group (order by teto_calculado) filter (where teto_calculado is not null)
+  from public.premissas_teto
+  where upper(ticker) = upper(p_ticker)
+    and carteira_id <> p_carteira_id
+    and auth.uid() is not null
+$$;
+
+grant execute on function public.premissas_da_comunidade(text, uuid) to authenticated;
+
+-- ------------------------------------------------------------
+--  A comparação com a comunidade passa a mostrar o MENOR teto calculado
+--  entre outras carteiras, não a mediana — consistente com o resto do
+--  sistema, que sempre prefere o número mais conservador quando há mais
+--  de uma referência (é a mesma regra de "o teto que vale é o mais baixo
+--  entre os modelos escolhidos", agora estendida à comparação entre
+--  carteiras).
+-- ------------------------------------------------------------
+drop function if exists public.premissas_da_comunidade(text, uuid);
+
+create function public.premissas_da_comunidade(p_ticker text, p_carteira_id uuid)
+returns table(quantidade bigint, mediana_dpa numeric, mediana_lpa numeric, mediana_vpa numeric,
+              mediana_yield numeric, mediana_pvp_maximo numeric, menor_teto numeric)
+language sql security definer set search_path = public as $$
+  select
+    count(*)::bigint,
+    percentile_cont(0.5) within group (order by dpa),
+    percentile_cont(0.5) within group (order by lpa),
+    percentile_cont(0.5) within group (order by vpa),
+    percentile_cont(0.5) within group (order by yield_exigido),
+    percentile_cont(0.5) within group (order by pvp_maximo),
+    min(teto_calculado) filter (where teto_calculado is not null)
+  from public.premissas_teto
+  where upper(ticker) = upper(p_ticker)
+    and carteira_id <> p_carteira_id
+    and auth.uid() is not null
+$$;
+
+grant execute on function public.premissas_da_comunidade(text, uuid) to authenticated;
+
+-- ------------------------------------------------------------
+--  Registro de aceite dos Termos de Uso e da Política de Privacidade,
+--  guardado no momento da criação da conta.
+-- ------------------------------------------------------------
+alter table public.perfis add column if not exists aceitou_termos_em timestamptz;
+
+-- ------------------------------------------------------------
+--  Para o caminho legado (DefinirSenha, quando a pessoa já chega
+--  autenticada pelo link do Supabase) — grava só a própria data de
+--  aceite, na própria linha. Não dá uma política de update geral em
+--  perfis porque isso deixaria e-mail e nome editáveis por conta própria,
+--  o que não é a ideia — essa função só toca a coluna do aceite.
+-- ------------------------------------------------------------
+create or replace function public.registrar_aceite_termos()
+returns void language sql security definer set search_path = public as $$
+  update public.perfis set aceitou_termos_em = now() where id = auth.uid()
+$$;
+
+grant execute on function public.registrar_aceite_termos() to authenticated;
+
+-- ------------------------------------------------------------
+--  Segmento padrão por ticker — uma sugestão compartilhada entre todo
+--  mundo que usa o gmINVEST, para não precisar etiquetar PETR4 como
+--  "Petróleo, Gás e Combustíveis" ativo por ativo, carteira por carteira.
+--  É só um PONTO DE PARTIDA: continua sendo possível escrever um nome
+--  diferente por cima, carteira por carteira, como sempre foi.
+--
+--  Leitura é livre pra qualquer conta logada — é a mesma lista pra todo
+--  mundo, não tem nada de privado aqui. Escrita é só de administrador,
+--  porque alguém precisa ser responsável por manter isso atualizado.
+-- ------------------------------------------------------------
+create table if not exists public.segmentos_padrao (
+  ticker     text primary key,
+  classe     text not null,
+  segmento   text not null,
+  atualizado timestamptz not null default now()
+);
+
+alter table public.segmentos_padrao enable row level security;
+
+drop policy if exists p_segmentos_padrao_ler on public.segmentos_padrao;
+create policy p_segmentos_padrao_ler on public.segmentos_padrao
+  for select using (auth.uid() is not null);
+
+drop policy if exists p_segmentos_padrao_escrever on public.segmentos_padrao;
+create policy p_segmentos_padrao_escrever on public.segmentos_padrao
+  for all using (exists (select 1 from public.administradores where usuario_id = auth.uid()))
+  with check (exists (select 1 from public.administradores where usuario_id = auth.uid()));
+
+-- povoamento inicial — os nomes de segmento batem com a lista sugerida
+-- que já existe no aplicativo (src/lib/formato.js, SEGMENTOS_SUGERIDOS).
+-- Não é uma lista completa da bolsa — é um começo sólido com os ativos
+-- mais líquidos de cada segmento. `on conflict do nothing` permite rodar
+-- este arquivo de novo sem sobrescrever uma correção manual já feita.
+insert into public.segmentos_padrao (ticker, classe, segmento) values
+  -- Ação — Bancos e Serviços Financeiros
+  ('ITUB4','Ação','Bancos e Serviços Financeiros'), ('ITUB3','Ação','Bancos e Serviços Financeiros'),
+  ('BBDC4','Ação','Bancos e Serviços Financeiros'), ('BBDC3','Ação','Bancos e Serviços Financeiros'),
+  ('BBAS3','Ação','Bancos e Serviços Financeiros'), ('SANB11','Ação','Bancos e Serviços Financeiros'),
+  ('BPAC11','Ação','Bancos e Serviços Financeiros'), ('BBSE3','Ação','Bancos e Serviços Financeiros'),
+  ('B3SA3','Ação','Bancos e Serviços Financeiros'), ('CIEL3','Ação','Bancos e Serviços Financeiros'),
+  ('BPAN4','Ação','Bancos e Serviços Financeiros'), ('IRBR3','Ação','Bancos e Serviços Financeiros'),
+  ('PSSA3','Ação','Bancos e Serviços Financeiros'), ('CXSE3','Ação','Bancos e Serviços Financeiros'),
+  -- Ação — Energia Elétrica
+  ('ELET3','Ação','Energia Elétrica'), ('ELET6','Ação','Energia Elétrica'), ('CMIG4','Ação','Energia Elétrica'),
+  ('CPFE3','Ação','Energia Elétrica'), ('EGIE3','Ação','Energia Elétrica'), ('TAEE11','Ação','Energia Elétrica'),
+  ('CPLE6','Ação','Energia Elétrica'), ('CPLE3','Ação','Energia Elétrica'), ('EQTL3','Ação','Energia Elétrica'),
+  ('ENGI11','Ação','Energia Elétrica'), ('AURE3','Ação','Energia Elétrica'), ('NEOE3','Ação','Energia Elétrica'),
+  ('ENEV3','Ação','Energia Elétrica'), ('AESB3','Ação','Energia Elétrica'),
+  -- Ação — Petróleo, Gás e Combustíveis
+  ('PETR4','Ação','Petróleo, Gás e Combustíveis'), ('PETR3','Ação','Petróleo, Gás e Combustíveis'),
+  ('PRIO3','Ação','Petróleo, Gás e Combustíveis'), ('RRRP3','Ação','Petróleo, Gás e Combustíveis'),
+  ('UGPA3','Ação','Petróleo, Gás e Combustíveis'), ('VBBR3','Ação','Petróleo, Gás e Combustíveis'),
+  ('CSAN3','Ação','Petróleo, Gás e Combustíveis'), ('RECV3','Ação','Petróleo, Gás e Combustíveis'),
+  -- Ação — Mineração e Siderurgia
+  ('VALE3','Ação','Mineração e Siderurgia'), ('CSNA3','Ação','Mineração e Siderurgia'),
+  ('GGBR4','Ação','Mineração e Siderurgia'), ('GOAU4','Ação','Mineração e Siderurgia'),
+  ('USIM5','Ação','Mineração e Siderurgia'), ('CMIN3','Ação','Mineração e Siderurgia'),
+  -- Ação — Construção e Imobiliário
+  ('CYRE3','Ação','Construção e Imobiliário'), ('EZTC3','Ação','Construção e Imobiliário'),
+  ('MRVE3','Ação','Construção e Imobiliário'), ('EVEN3','Ação','Construção e Imobiliário'),
+  ('DIRR3','Ação','Construção e Imobiliário'), ('TEND3','Ação','Construção e Imobiliário'),
+  ('JHSF3','Ação','Construção e Imobiliário'), ('CURY3','Ação','Construção e Imobiliário'),
+  ('TRIS3','Ação','Construção e Imobiliário'),
+  -- Ação — Varejo e Consumo
+  ('MGLU3','Ação','Varejo e Consumo'), ('LREN3','Ação','Varejo e Consumo'), ('RENT3','Ação','Varejo e Consumo'),
+  ('VIVA3','Ação','Varejo e Consumo'), ('PETZ3','Ação','Varejo e Consumo'), ('ARZZ3','Ação','Varejo e Consumo'),
+  ('CEAB3','Ação','Varejo e Consumo'), ('AMAR3','Ação','Varejo e Consumo'), ('SBFG3','Ação','Varejo e Consumo'),
+  ('ALPA4','Ação','Varejo e Consumo'), ('GUAR3','Ação','Varejo e Consumo'),
+  -- Ação — Alimentos e Bebidas
+  ('ABEV3','Ação','Alimentos e Bebidas'), ('JBSS3','Ação','Alimentos e Bebidas'),
+  ('BRFS3','Ação','Alimentos e Bebidas'), ('MRFG3','Ação','Alimentos e Bebidas'),
+  ('BEEF3','Ação','Alimentos e Bebidas'), ('SMTO3','Ação','Alimentos e Bebidas'),
+  ('CAML3','Ação','Alimentos e Bebidas'),
+  -- Ação — Indústria e Bens de Capital
+  ('WEGE3','Ação','Indústria e Bens de Capital'), ('EMBR3','Ação','Indústria e Bens de Capital'),
+  ('RAPT4','Ação','Indústria e Bens de Capital'), ('TUPY3','Ação','Indústria e Bens de Capital'),
+  ('POMO4','Ação','Indústria e Bens de Capital'), ('KEPL3','Ação','Indústria e Bens de Capital'),
+  ('MTSA4','Ação','Indústria e Bens de Capital'),
+  -- Ação — Tecnologia e Software
+  ('TOTS3','Ação','Tecnologia e Software'), ('LWSA3','Ação','Tecnologia e Software'),
+  ('POSI3','Ação','Tecnologia e Software'),
+  -- Ação — Telecomunicações e Mídia
+  ('VIVT3','Ação','Telecomunicações e Mídia'), ('TIMS3','Ação','Telecomunicações e Mídia'),
+  -- Ação — Saúde e Farmacêutico
+  ('RADL3','Ação','Saúde e Farmacêutico'), ('HAPV3','Ação','Saúde e Farmacêutico'),
+  ('FLRY3','Ação','Saúde e Farmacêutico'), ('RDOR3','Ação','Saúde e Farmacêutico'),
+  ('HYPE3','Ação','Saúde e Farmacêutico'), ('PNVL3','Ação','Saúde e Farmacêutico'),
+  ('QUAL3','Ação','Saúde e Farmacêutico'), ('ONCO3','Ação','Saúde e Farmacêutico'),
+  -- Ação — Transportes e Logística
+  ('RAIL3','Ação','Transportes e Logística'), ('CCRO3','Ação','Transportes e Logística'),
+  ('STBP3','Ação','Transportes e Logística'), ('AZUL4','Ação','Transportes e Logística'),
+  ('GOLL4','Ação','Transportes e Logística'), ('ECOR3','Ação','Transportes e Logística'),
+  ('JSLG3','Ação','Transportes e Logística'),
+  -- Ação — Agronegócio e Papel & Celulose
+  ('SUZB3','Ação','Agronegócio e Papel & Celulose'), ('KLBN11','Ação','Agronegócio e Papel & Celulose'),
+  ('SLCE3','Ação','Agronegócio e Papel & Celulose'), ('SOJA3','Ação','Agronegócio e Papel & Celulose'),
+  ('AGRO3','Ação','Agronegócio e Papel & Celulose'), ('RAIZ4','Ação','Agronegócio e Papel & Celulose'),
+  -- Ação — Utilidades e Serviços Públicos
+  ('SBSP3','Ação','Utilidades e Serviços Públicos'), ('SAPR11','Ação','Utilidades e Serviços Públicos'),
+  ('CSMG3','Ação','Utilidades e Serviços Públicos'), ('ORVR3','Ação','Utilidades e Serviços Públicos'),
+  -- Ação — Diversificado / Holding
+  ('ITSA4','Ação','Diversificado / Holding'), ('SIMH3','Ação','Diversificado / Holding'),
+
+  -- FII — Logística
+  ('HGLG11','FII','Logística'), ('XPLG11','FII','Logística'), ('VILG11','FII','Logística'),
+  ('BTLG11','FII','Logística'), ('LVBI11','FII','Logística'), ('GGRC11','FII','Logística'),
+  ('BRCO11','FII','Logística'), ('ALZR11','FII','Logística'),
+  -- FII — Shopping Centers
+  ('XPML11','FII','Shopping Centers'), ('VISC11','FII','Shopping Centers'), ('HGBS11','FII','Shopping Centers'),
+  ('MALL11','FII','Shopping Centers'), ('VRTA11','FII','Shopping Centers'),
+  -- FII — Lajes Corporativas
+  ('HGRE11','FII','Lajes Corporativas'), ('PVBI11','FII','Lajes Corporativas'), ('RCRB11','FII','Lajes Corporativas'),
+  ('BRCR11','FII','Lajes Corporativas'), ('JSRE11','FII','Lajes Corporativas'),
+  -- FII — Híbrido
+  ('KNRI11','FII','Híbrido'), ('RBRP11','FII','Híbrido'), ('HGFF11','FII','Híbrido'),
+  -- FII — Renda Urbana
+  ('HGRU11','FII','Renda Urbana'), ('RBRR11','FII','Renda Urbana'), ('TRXF11','FII','Renda Urbana'),
+  ('HCTR11','FII','Renda Urbana'),
+  -- FII — CRI / Recebíveis
+  ('KNCR11','FII','CRI / Recebíveis'), ('KNSC11','FII','CRI / Recebíveis'), ('IRDM11','FII','CRI / Recebíveis'),
+  ('MXRF11','FII','CRI / Recebíveis'), ('CPTS11','FII','CRI / Recebíveis'), ('VGIR11','FII','CRI / Recebíveis'),
+  ('RECR11','FII','CRI / Recebíveis'), ('KNIP11','FII','CRI / Recebíveis'), ('KNHY11','FII','CRI / Recebíveis'),
+  ('AFHI11','FII','CRI / Recebíveis'), ('DEVA11','FII','CRI / Recebíveis'), ('VCJR11','FII','CRI / Recebíveis'),
+  ('HGCR11','FII','CRI / Recebíveis'), ('RZTR11','FII','CRI / Recebíveis'), ('BRBI11','FII','CRI / Recebíveis'),
+  -- FII — Fundo de Fundos (FOF)
+  ('BCFF11','FII','Fundo de Fundos (FOF)'), ('RBFF11','FII','Fundo de Fundos (FOF)'), ('KFOF11','FII','Fundo de Fundos (FOF)'),
+  ('MFII11','FII','Fundo de Fundos (FOF)'), ('XPSF11','FII','Fundo de Fundos (FOF)'),
+  -- FII — Agronegócio / Fiagro
+  ('FGAA11','FII','Agronegócio / Fiagro'), ('RZAG11','FII','Agronegócio / Fiagro'), ('VGIA11','FII','Agronegócio / Fiagro'),
+  ('KNCA11','FII','Agronegócio / Fiagro'), ('AAZQ11','FII','Agronegócio / Fiagro'),
+  -- FII — Educacional
+  ('AEFI11','FII','Educacional'), ('FCFL11','FII','Educacional'),
+  -- FII — Hospitalar
+  ('NSLU11','FII','Hospitalar'), ('HOSP11','FII','Hospitalar')
+on conflict (ticker) do nothing;

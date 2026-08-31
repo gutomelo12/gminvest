@@ -8,10 +8,9 @@ import Login from './telas/Login'
 import DefinirSenha from './telas/DefinirSenha'
 import AceitarConvite from './telas/AceitarConvite'
 import Resumo from './telas/Resumo'
-import Posicoes from './telas/Posicoes'
 import Operacoes from './telas/Operacoes'
 import Proventos from './telas/Proventos'
-import Alocacao from './telas/Alocacao'
+import Alocacao, { Simulador, Reserva } from './telas/Alocacao'
 import PrecoTeto from './telas/PrecoTeto'
 import Cotacoes from './telas/Cotacoes'
 // a leitura de planilhas carrega a SheetJS; só baixa quando a tela é aberta
@@ -21,24 +20,26 @@ import Ajuda from './telas/Ajuda'
 
 const ICONES = {
   resumo:    'M3 13h4v6H3zM10 5h4v14h-4zM17 9h4v10h-4z',
-  posicoes:  'M4 6h16M4 12h16M4 18h10',
   operacoes: 'M12 5v14M5 12h14',
   proventos: 'M12 3v18M8 7h6a3 3 0 010 6H9a3 3 0 000 6h7',
   alocacao:  'M12 3a9 9 0 109 9h-9V3z',
+  reserva:   'M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z',
   teto:      'M3 17l6-6 4 4 7-7M14 4h7v7',
   cotacoes:  'M3 17l6-6 4 4 7-7M21 8v5h-5',
+  simulador: 'M12 21a9 9 0 100-18 9 9 0 000 18zM12 3v18M3 12h18',
   b3:        'M12 3v12m0 0l-4-4m4 4l4-4M4 19h16',
   ajustes:   'M12 15a3 3 0 100-6 3 3 0 000 6zM4 12h2m12 0h2M12 4v2m0 12v2',
   ajuda:     'M12 17h.01M9.5 9a2.5 2.5 0 115 0c0 1.5-2.5 2-2.5 3.5M12 21a9 9 0 100-18 9 9 0 000 18z',
 }
 const TELAS = {
   resumo:    'Resumo',
-  posicoes:  'Posições',
   operacoes: 'Operações',
   proventos: 'Proventos',
   alocacao:  'Alocação',
+  reserva:   'Reserva de emergência',
   teto:      'Preço teto',
   cotacoes:  'Cotações',
+  simulador: 'Simulador de aporte',
   b3:        'Importações',
   ajustes:   'Ajustes',
   ajuda:     'Ajuda',
@@ -143,16 +144,17 @@ function Interior() {
   const t = d.calc.total
   const subtitulos = {
     resumo: d.operacoes.length
-      ? `${t.ativos} ativo${t.ativos === 1 ? '' : 's'} em carteira · ${d.operacoes.length} operações registradas`
+      ? `${t.ativos} ativo${t.ativos === 1 ? '' : 's'} em carteira`
       : 'Carteira sem lançamentos',
-    posicoes: 'Clique em um ativo para ver o histórico completo',
     operacoes: `${d.operacoes.length} lançamento${d.operacoes.length === 1 ? '' : 's'} na carteira`,
-    proventos: `${fmtBRL(d.proventos.reduce((s, p) => s + Number(p.valor), 0))} recebidos em ${d.proventos.length} crédito${d.proventos.length === 1 ? '' : 's'}`,
-    alocacao: 'Defina o peso de cada classe e simule o próximo aporte',
+    proventos: null,
+    alocacao: 'Defina o peso de cada classe, por segmento e por ativo',
+    reserva: 'Sua rede de segurança antes de investir',
     teto: 'Bazin, Graham e Gordon lado a lado, com margem de segurança',
     cotacoes: t.semCotacao
       ? `${t.semCotacao} de ${t.ativos} ativos ainda sem preço de mercado`
       : `Todos os ${t.ativos} ativos têm cotação registrada`,
+    simulador: 'Só compra, nunca venda — distribui o aporte pelas classes que faltam',
     b3: 'Extratos da B3 em planilha, ou notas da Nomad em PDF',
     ajustes: d.carteira?.nome || '',
     ajuda: 'Por onde começar, e o que cada tela faz',
@@ -161,24 +163,24 @@ function Interior() {
   const acoes = {
     resumo: d.podeEscrever && [
       ['Lançar operação', () => { setEditandoOp({}); setTela('operacoes') }, 'verde'],
-      [buscandoCotacoes ? 'Atualizando…' : 'Atualizar cotações', atualizarCotacoes, 'vazio', buscandoCotacoes],
+      [buscandoCotacoes ? 'Atualizando…' : 'Atualizar cotações', atualizarCotacoes, 'verde', buscandoCotacoes],
     ],
-    posicoes: d.podeEscrever && [['Lançar operação', () => { setEditandoOp({}); setTela('operacoes') }, 'verde']],
     operacoes: d.podeEscrever && [
       ['Lançar operação', () => setEditandoOp({}), 'verde'],
-      ['Importar da B3', () => ir('b3'), 'vazio'],
+      ['Importações', () => ir('b3'), 'verde'],
     ],
     proventos: d.podeEscrever && [['Lançar provento', () => setEditandoPv({}), 'verde']],
   }[tela] || []
 
   const Corpo = {
     resumo: <Resumo ir={ir} />,
-    posicoes: <Posicoes ir={ir} />,
     operacoes: <Operacoes ir={ir} editando={editandoOp} setEditando={setEditandoOp} />,
     proventos: <Proventos ir={ir} editando={editandoPv} setEditando={setEditandoPv} />,
     alocacao: <Alocacao />,
+    reserva: <Reserva d={d} />,
     teto: <PrecoTeto focoTicker={foco} limparFoco={() => setFoco(null)} />,
     cotacoes: <Cotacoes ir={ir} />,
+    simulador: <Simulador d={d} ir={ir} />,
     b3: <Suspense fallback={<div className="carregando">Carregando o leitor de planilhas…</div>}><ImportarB3 ir={ir} /></Suspense>,
     ajustes: <Ajustes />,
     ajuda: <Ajuda ir={ir} />,
@@ -224,11 +226,17 @@ function Interior() {
               <span>{r}</span>
             </button>
           ))}
+          <button className="nav-sair" onClick={sair}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+            </svg>
+            <span>Sair da conta</span>
+          </button>
         </nav>
         <div className="lateral-pe">
           {d.carteira?.papel === 'leitura' && <div style={{ marginBottom: 6 }}>Acesso de leitura</div>}
           <RelogioCotacoes d={d} />
-          <button onClick={sair}>Sair da conta</button>
         </div>
       </aside>
 

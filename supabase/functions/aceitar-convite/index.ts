@@ -33,9 +33,13 @@ Deno.serve(async req => {
     new Response(JSON.stringify(corpo), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
   try {
-    const { token, senha } = await req.json()
+    const { token, senha, aceitouTermos } = await req.json()
     if (!token || typeof token !== 'string') return responder({ erro: 'Convite inválido.' }, 400)
     if (!senha || senha.length < 8) return responder({ erro: 'A senha precisa de pelo menos 8 caracteres.' }, 400)
+    // conferido aqui também, e não só na tela: uma chamada direta à função,
+    // pulando o formulário, não pode criar conta sem o aceite
+    if (aceitouTermos !== true)
+      return responder({ erro: 'É preciso aceitar os Termos de Uso e a Política de Privacidade.' }, 400)
 
     const url = Deno.env.get('SUPABASE_URL')!
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -82,6 +86,12 @@ Deno.serve(async req => {
     await admin.from('convites_cadastro')
       .update({ usado_em: new Date().toISOString(), usuario_id: usuarioId })
       .eq('token_hash', tokenHash)
+
+    // o gatilho que cria a linha em perfis roda no mesmo INSERT do
+    // createUser acima, então a linha já existe neste ponto
+    await admin.from('perfis')
+      .update({ aceitou_termos_em: new Date().toISOString() })
+      .eq('id', usuarioId)
 
     return responder({ ok: true, email: convite.email })
   } catch (e) {

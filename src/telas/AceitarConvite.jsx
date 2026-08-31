@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { sb, mensagemDeErroDaFuncao } from '../lib/supabase'
-import { Guilhoche } from '../comp/base'
+import { Guilhoche, Modal } from '../comp/base'
+import { TermosDeUso, PoliticaPrivacidade } from './Legal'
 
 /**
  * Tela de quem chega pelo link de convite. Ainda não existe conta nenhuma
@@ -11,6 +12,8 @@ import { Guilhoche } from '../comp/base'
 export default function AceitarConvite({ token, aoConcluir }) {
   const [senha, setSenha] = useState('')
   const [senha2, setSenha2] = useState('')
+  const [aceitouTermos, setAceitouTermos] = useState(false)
+  const [verDocumento, setVerDocumento] = useState(null)
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
 
@@ -19,9 +22,10 @@ export default function AceitarConvite({ token, aoConcluir }) {
     setErro(null)
     if (senha.length < 8) return setErro('A senha precisa de pelo menos 8 caracteres.')
     if (senha !== senha2) return setErro('As senhas não conferem.')
+    if (!aceitouTermos) return setErro('Para criar a conta, é preciso aceitar os Termos de Uso e a Política de Privacidade.')
     setOcupado(true)
     try {
-      const { data, error } = await sb.functions.invoke('aceitar-convite', { body: { token, senha } })
+      const { data, error } = await sb.functions.invoke('aceitar-convite', { body: { token, senha, aceitouTermos } })
       if (error) throw new Error(await mensagemDeErroDaFuncao(error, 'aceitar-convite'))
       if (data?.erro) throw new Error(data.erro)
       const { error: eLogin } = await sb.auth.signInWithPassword({ email: data.email, password: senha })
@@ -41,7 +45,7 @@ export default function AceitarConvite({ token, aoConcluir }) {
         <div className="cedula-corpo">
           <div className="rotulo">Bem-vindo(a)</div>
           <p style={{ fontSize: 13, color: 'var(--tinta-3)', margin: '8px 0 18px', lineHeight: 1.6 }}>
-            Você foi convidado(a) para o gminvest. Escolha uma senha para concluir o seu cadastro —
+            Você foi convidado(a) para o gmINVEST. Escolha uma senha para concluir o seu cadastro —
             esta conta é sua, independente de quem te convidou.
           </p>
           <form onSubmit={enviar}>
@@ -51,6 +55,15 @@ export default function AceitarConvite({ token, aoConcluir }) {
             <label className="campo"><span className="rotulo">Repita a senha</span>
               <input type="password" value={senha2} onChange={e => setSenha2(e.target.value)}
                 autoComplete="new-password" required /></label>
+            <label className="linha-cheque" style={{ marginBottom: 16, alignItems: 'flex-start' }}>
+              <input type="checkbox" checked={aceitouTermos} style={{ marginTop: 2 }}
+                onChange={e => setAceitouTermos(e.target.checked)} />
+              <span>Li e aceito os{' '}
+                <button type="button" className="link" onClick={() => setVerDocumento('termos')}>Termos de Uso</button>
+                {' '}e a{' '}
+                <button type="button" className="link" onClick={() => setVerDocumento('privacidade')}>Política de Privacidade</button>
+              </span>
+            </label>
             {erro && <div className="aviso erro" style={{ marginBottom: 14 }}>{erro}</div>}
             <button className="btn verde cheio" disabled={ocupado}>
               {ocupado ? 'Criando conta…' : 'Criar conta e entrar'}
@@ -58,6 +71,14 @@ export default function AceitarConvite({ token, aoConcluir }) {
           </form>
         </div>
       </div>
+
+      {verDocumento && (
+        <Modal titulo={verDocumento === 'termos' ? 'Termos de Uso' : 'Política de Privacidade'}
+          largo aoFechar={() => setVerDocumento(null)}
+          pe={<button className="btn verde" onClick={() => setVerDocumento(null)}>Fechar</button>}>
+          {verDocumento === 'termos' ? <TermosDeUso /> : <PoliticaPrivacidade />}
+        </Modal>
+      )}
     </div></div>
   )
 }

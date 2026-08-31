@@ -21,6 +21,7 @@ export default function Ajustes() {
   const [nome, setNome] = useState(carteira?.nome || '')
   const [cor, setCor] = useState(carteira?.cor || '#0B6E4F')
   const [confirma, setConfirma] = useState(false)
+  const [excluindoConta, setExcluindoConta] = useState(false)
 
   useEffect(() => { setNome(carteira?.nome || ''); setCor(carteira?.cor || '#0B6E4F') }, [carteira?.id])
 
@@ -66,13 +67,13 @@ export default function Ajustes() {
       {eDono && <Compartilhamento carteira={carteira} />}
 
       <Painel titulo="Exportar" aoLado="seus dados, no seu computador">
-        <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14, maxWidth: 760 }}>
+        <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
           Um retrato completo da carteira, para guardar fora do Supabase ou levar para uma planilha.
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" onClick={() => baixar(
-            `gminvest-${semAcento(carteira.nome).replace(/\W+/g, '-')}-${hoje()}.json`,
-            JSON.stringify({ app: 'gminvest', versao: 1, exportadoEm: new Date().toISOString(),
+            `gmINVEST-${semAcento(carteira.nome).replace(/\W+/g, '-')}-${hoje()}.json`,
+            JSON.stringify({ app: 'gmINVEST', versao: 1, exportadoEm: new Date().toISOString(),
               carteira: carteira.nome, operacoes, proventos }, null, 2),
             'application/json')}>Baixar .json</button>
           <button className="btn vazio" onClick={() => {
@@ -89,10 +90,15 @@ export default function Ajustes() {
         <p className="dica" style={{ marginBottom: 14 }}>
           Você tem acesso a {carteiras.length} carteira{carteiras.length === 1 ? '' : 's'}.
         </p>
-        <button className="btn vazio" onClick={sair}>Sair da conta</button>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button className="btn vazio" onClick={sair}>Sair da conta</button>
+          <button className="btn perigo" onClick={() => setExcluindoConta(true)}>Excluir minha conta</button>
+        </div>
       </Painel>
 
       <ConvidarConta />
+
+      {excluindoConta && <ExcluirConta usuario={usuario} sair={sair} aoFechar={() => setExcluindoConta(false)} />}
 
       {confirma && (
         <Confirmacao titulo={`Apagar “${carteira.nome}”`} perigo rotulo="Apagar para sempre"
@@ -114,6 +120,58 @@ export default function Ajustes() {
  * nenhuma carteira sua, só ganha permissão pra existir e cai direto na
  * tela de criar a própria primeira carteira.
  */
+/**
+ * Excluir a própria conta é irreversível — por isso não basta um clique
+ * de confirmação genérico. A pessoa precisa digitar o próprio e-mail,
+ * exatamente igual, antes do botão de excluir ficar disponível.
+ */
+function ExcluirConta({ usuario, sair, aoFechar }) {
+  const [confirmacao, setConfirmacao] = useState('')
+  const [ocupado, setOcupado] = useState(false)
+  const [erro, setErro] = useState(null)
+  const bate = confirmacao.trim().toLowerCase() === (usuario?.email || '').toLowerCase()
+
+  async function excluir() {
+    setOcupado(true); setErro(null)
+    try {
+      const { data, error } = await sb.functions.invoke('excluir-conta')
+      if (error) throw new Error(await mensagemDeErroDaFuncao(error, 'excluir-conta'))
+      if (data?.erro) throw new Error(data.erro)
+      await sair()
+    } catch (e) {
+      setErro(e.message)
+      setOcupado(false)
+    }
+  }
+
+  return (
+    <Modal titulo="Excluir sua conta" aoFechar={aoFechar} pe={<>
+      <button className="btn vazio" onClick={aoFechar}>Cancelar</button>
+      <button className="btn perigo" disabled={!bate || ocupado} onClick={excluir}>
+        {ocupado ? 'Excluindo…' : 'Excluir para sempre'}
+      </button>
+    </>}>
+      <p style={{ fontSize: 13.5, lineHeight: 1.6, marginBottom: 14 }}>
+        Isto apaga sua conta e <strong>toda carteira sua que ninguém mais acessa</strong>, com todas as
+        operações, proventos, alvos e premissas dentro delas — sem volta. Seu acesso a carteiras de outras
+        pessoas também é removido, sem afetar a carteira delas.
+      </p>
+      <p style={{ fontSize: 13.5, lineHeight: 1.6, marginBottom: 14 }}>
+        Se você é dona de uma carteira que <strong>outra pessoa também acessa</strong>, a exclusão é
+        bloqueada até você resolver isso primeiro, em Ajustes → Quem acessa esta carteira — removendo o
+        acesso dela ou passando a posição de dono para outra pessoa. O mesmo vale se você for a única
+        administradora do sistema.
+      </p>
+      <label className="campo">
+        <span className="rotulo">Digite seu e-mail para confirmar</span>
+        <input value={confirmacao} onChange={e => setConfirmacao(e.target.value)}
+          placeholder={usuario?.email} autoFocus />
+      </label>
+      {erro && <div className="aviso erro" style={{ marginTop: 10 }}>{erro}</div>}
+    </Modal>
+  )
+}
+
 function ConvidarConta() {
   const { usuario } = useSessao()
   const recibo = useRecibo()
@@ -160,7 +218,7 @@ function ConvidarConta() {
   }
 
   const mensagem = link
-    ? `Oi${nome ? ' ' + nome : ''}! Criei um acesso pra você no gminvest, o app que uso para organizar `
+    ? `Oi${nome ? ' ' + nome : ''}! Criei um acesso pra você no gmINVEST, o app que uso para organizar `
       + `os investimentos. É só clicar no link, escolher uma senha e você já entra direto — a carteira `
       + `é sua, começa vazia:\n\n${link}\n\nO link vale por ${horas} horas, se der problema me chama que eu gero outro.`
     : ''
@@ -173,15 +231,7 @@ function ConvidarConta() {
 
   return (
     <>
-      <Painel titulo="Convidar para o gminvest" aoLado="conta nova, sem vínculo com esta carteira">
-        <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14, maxWidth: 800 }}>
-          Gera um link de convite — nada de e-mail automático em inglês. Copie e mande você mesmo, por
-          WhatsApp ou onde preferir. Abrir o link não gasta nada; só define a senha quando a pessoa
-          realmente enviar o formulário — então a prévia que o WhatsApp gera sozinho ao colar o link não
-          queima o convite antes da hora. Quem completa cai direto em "criar minha primeira carteira":
-          nada aqui empresta acesso ao que já é seu. Convidar um e-mail que já tem conta não dá erro —
-          troca a senha dessa conta ao ser usado.
-        </p>
+      <Painel titulo="Convidar para o gmINVEST" aoLado="conta nova, sem vínculo com esta carteira">
         <div className="grade" style={{ gridTemplateColumns: '1fr 1.8fr', maxWidth: 640, marginBottom: 10 }}>
           <label className="campo" style={{ marginBottom: 0 }}>
             <span className="rotulo">E-mail</span>
@@ -206,7 +256,7 @@ function ConvidarConta() {
             <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
               <button className="btn vazio" onClick={copiar}>{copiado ? 'Copiado!' : 'Copiar mensagem'}</button>
               <span style={{ fontSize: 12, color: 'var(--tinta-3)' }}>
-                Validade de {horas} horas, controlada pelo próprio gminvest — não depende de nenhuma
+                Validade de {horas} horas, controlada pelo próprio gmINVEST — não depende de nenhuma
                 configuração do Supabase.
               </span>
             </div>
@@ -398,8 +448,8 @@ function Compartilhamento({ carteira }) {
         {PAPEIS.map(([, r, d]) => <div key={r}><strong>{r}:</strong> {d}</div>)}
         <div style={{ marginTop: 6 }}>
           O convite fica guardado e vira acesso na hora em que a pessoa entrar com esse e-mail. Cadastro no
-          gminvest é só por convite — se ela ainda não tem conta, peça a quem administra o gminvest para
-          convidá-la primeiro (em Ajustes → Convidar para o gminvest), usando o mesmo endereço.
+          gmINVEST é só por convite — se ela ainda não tem conta, peça a quem administra o gmINVEST para
+          convidá-la primeiro (em Ajustes → Convidar para o gmINVEST), usando o mesmo endereço.
         </div>
       </div>
     </Painel>
@@ -494,7 +544,7 @@ function Fracionarios() {
 
   return (
     <Painel titulo="Códigos do mercado fracionário" aoLado={`${pares.length} para unificar`}>
-      <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14, maxWidth: 820 }}>
+      <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
         O <strong>F</strong> no fim do código só indica que a compra foi feita em lote menor que cem.
         O papel é o mesmo, a custódia é a mesma e o preço médio deveria ser um só — inclusive para a
         apuração do imposto. Enquanto estiverem separados, cada um mostra um preço médio parcial e a
@@ -643,7 +693,7 @@ function Classificacao() {
 
   return (
     <Painel titulo="Classificação dos ativos" aoLado={`${ativos.length} em carteira`}>
-      <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14, maxWidth: 820 }}>
+      <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
         A classe começa deduzida do código do papel, e dedução erra — códigos terminados em 11 podem ser
         fundo imobiliário, ETF ou Unit, e não há como saber pelo ticker. <strong>O que você escolher aqui
         vale para tudo</strong>: alocação, preço teto e os blocos da tela de Posições. Nenhuma importação
@@ -752,7 +802,7 @@ function Duplicatas() {
 
   return (
     <Painel titulo="Operações em dobro" aoLado={`${pares.length} suspeita${pares.length === 1 ? '' : 's'}`}>
-      <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14, maxWidth: 820 }}>
+      <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
         Cada par abaixo é o mesmo papel, mesma quantidade e mesmo preço, com poucos dias de intervalo.
         Quase sempre é o relatório de Negociação e o de Movimentação descrevendo o mesmo negócio — um na
         data do pregão, outro na liquidação. <strong>Confira antes de apagar:</strong> se você de fato
@@ -822,12 +872,12 @@ function Recomecar() {
     <Painel titulo="Recomeçar a carteira" aoLado="último recurso">
       {!aberto ? (
         <>
-          <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14, maxWidth: 820 }}>
+          <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
             Apaga as {operacoes.length} operações e os {proventos.length} proventos desta carteira, para
             você reimportar tudo dos arquivos da B3. Cotações, alocação alvo, premissas de preço teto e as
             classes que você definiu <strong>permanecem</strong>.
           </p>
-          <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14, maxWidth: 820 }}>
+          <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
             Vale a pena quando a carteira passou por importações erradas e correções manuais em cima. Os
             arquivos da B3 são a fonte original: reconstruir a partir deles costuma sair mais limpo do
             que caçar cada lançamento indevido.

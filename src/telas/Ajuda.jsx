@@ -1,4 +1,6 @@
-import { Painel } from '../comp/base'
+import { useState } from 'react'
+import { Painel, Modal } from '../comp/base'
+import { TermosDeUso, PoliticaPrivacidade } from './Legal'
 
 const PASSOS = [
   {
@@ -64,7 +66,7 @@ const TELAS_INFO = [
 
 const AJUSTES_INFO = [
   ['Sua conta', 'Seu e-mail e um botão para sair.'],
-  ['Convidar para o gminvest', 'Só aparece para quem administra o sistema. Gera um link para uma pessoa criar conta nova, independente — não empresta acesso a nenhuma carteira sua.'],
+  ['Convidar para o gmINVEST', 'Só aparece para quem administra o sistema. Gera um link para uma pessoa criar conta nova, independente — não empresta acesso a nenhuma carteira sua.'],
   ['Convites enviados', 'Também só para administradores: lista quem foi convidado e se já terminou de entrar ou ainda está pendente.'],
   ['Duplicatas', 'Encontra lançamentos que parecem repetidos (mesmo ativo, quantidade e preço parecido, poucos dias de diferença) e deixa remover em lote.'],
   ['Recomeçar a carteira', 'Apaga operações e proventos, preservando cotações, alocação alvo, preço teto e classificação — para reimportar do zero quando o histórico ficou bagunçado.'],
@@ -75,6 +77,7 @@ const AJUSTES_INFO = [
 ]
 
 export default function Ajuda({ ir }) {
+  const [verDocumento, setVerDocumento] = useState(null)
   return (
     <>
       <Painel titulo="Por onde começar" aoLado="uma sequência sugerida, não uma obrigação">
@@ -120,7 +123,7 @@ export default function Ajuda({ ir }) {
       <Painel titulo="Dentro de Ajustes" aoLado="um painel por assunto, nem todos aparecem sempre">
         <p style={{ fontSize: 13, color: 'var(--tinta-3)', marginBottom: 16, maxWidth: 820, lineHeight: 1.6 }}>
           Ajustes reúne o que não é do dia a dia — manutenção da carteira, quem tem acesso a ela, e (para
-          quem administra o gminvest) o convite de contas novas. Alguns painéis só aparecem quando fazem
+          quem administra o gmINVEST) o convite de contas novas. Alguns painéis só aparecem quando fazem
           sentido: "Duplicatas" some se não houver nenhuma, os de administrador somem se você não for um.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -165,16 +168,42 @@ export default function Ajuda({ ir }) {
             </p>
           </div>
           <div>
-            <strong style={{ fontSize: 13 }}>Como convido alguém para usar o gminvest?</strong>
+            <strong style={{ fontSize: 13 }}>Como convido alguém para usar o gmINVEST?</strong>
             <p style={{ fontSize: 13, color: 'var(--tinta-2)', lineHeight: 1.6, marginTop: 4, maxWidth: 780 }}>
               Cadastro é só por convite. Se você administra o sistema, gere o link em Ajustes → Convidar
-              para o gminvest — é uma conta nova e independente, sem vínculo com a sua. Se você só quer
+              para o gmINVEST — é uma conta nova e independente, sem vínculo com a sua. Se você só quer
               compartilhar <em>esta carteira</em> com alguém que já tem conta, use Ajustes → Quem acessa
               esta carteira.
             </p>
           </div>
+          <div>
+            <strong style={{ fontSize: 13 }}>Por que "Evolução do patrimônio" começa vazio, mesmo eu tendo lançamentos antigos?</strong>
+            <p style={{ fontSize: 13, color: 'var(--tinta-2)', lineHeight: 1.6, marginTop: 4, maxWidth: 780 }}>
+              Esse gráfico mostra o valor de mercado da carteira dia a dia — e não existe preço histórico
+              disponível de graça para reconstruir quanto sua carteira valia antes de você começar a usar
+              o sistema. A régua começa a andar a partir do dia em que a carteira foi aberta aqui, mesmo
+              que suas operações de compra e venda sejam de anos atrás. Isso não afeta patrimônio,
+              resultado nem rentabilidade — só esse gráfico específico de evolução ao longo do tempo.
+            </p>
+          </div>
         </div>
       </Painel>
+
+      <Painel titulo="Termos e privacidade">
+        <p style={{ fontSize: 13, color: 'var(--tinta-2)', lineHeight: 1.6 }}>
+          <button className="link" onClick={() => setVerDocumento('termos')}>Termos de Uso</button>
+          {' '}·{' '}
+          <button className="link" onClick={() => setVerDocumento('privacidade')}>Política de Privacidade</button>
+        </p>
+      </Painel>
+
+      {verDocumento && (
+        <Modal titulo={verDocumento === 'termos' ? 'Termos de Uso' : 'Política de Privacidade'}
+          largo aoFechar={() => setVerDocumento(null)}
+          pe={<button className="btn verde" onClick={() => setVerDocumento(null)}>Fechar</button>}>
+          {verDocumento === 'termos' ? <TermosDeUso /> : <PoliticaPrivacidade />}
+        </Modal>
+      )}
     </>
   )
 }

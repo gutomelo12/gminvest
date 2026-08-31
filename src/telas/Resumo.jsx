@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { useDados } from '../ctx/Dados'
-import { Painel, Rosca, Evolucao, Colunas, Vazio, Ponto, useContagem } from '../comp/base'
-import { fmtBRL, fmtPct, fmtPctSimples, sinal, corClasseEfetiva } from '../lib/formato'
-import { proventosPorMes, patrimonioPorMes, aportesPorMes } from '../lib/calculo'
+import { Painel, Rosca, Evolucao, Colunas, Vazio, Ponto, Seta, useContagem } from '../comp/base'
+import { fmtBRL, fmtData, fmtPct, fmtPctSimples, sinal, corClasseEfetiva } from '../lib/formato'
+import { proventosPorMes, patrimonioPorMes, aportesPorMes, custoAcumuladoPorMes } from '../lib/calculo'
 import TabelaPosicoes from './TabelaPosicoes'
 import Pendencias from '../comp/Pendencias'
 
@@ -29,7 +30,20 @@ export default function Resumo({ ir }) {
   const [inteiro, cent = '00'] = fmtBRL(valorExibido).replace('R$', '').trim().split(',')
   const meses = proventosPorMes(proventos, 12)
   const soma12 = meses.reduce((s, m) => s + m.valor, 0)
-  const evolucao = patrimonioPorMes(historico, 12)
+  // meses sem fotografia de patrimônio (antes de você começar a usar o
+  // sistema) mostram o capital aportado acumulado no lugar — não é valor
+  // de mercado, então cada mês carrega a marca "estimado" para o gráfico
+  // desenhar essa parte diferente da parte com dado real
+  const evolucaoReal = patrimonioPorMes(historico, 12)
+  const precisaEstimativa = evolucaoReal.some(m => m.valor == null)
+  const evolucao = precisaEstimativa
+    ? (() => {
+        const estimado = custoAcumuladoPorMes(operacoes, mapaClasses, taxasCambio, 12)
+        return evolucaoReal.map((m, i) => m.valor != null
+          ? { ...m, estimado: false }
+          : { ...m, valor: estimado[i].valor, estimado: true })
+      })()
+    : evolucaoReal.map(m => ({ ...m, estimado: false }))
   const mesesAporte = aportesPorMes(operacoes, taxasCambio, mapaClasses, 12)
   const somaAportes12 = mesesAporte.reduce((s, m) => s + m.valor, 0)
 
@@ -101,15 +115,17 @@ export default function Resumo({ ir }) {
       )}
 
       <div className="duas-largas">
-        <Painel titulo="Evolução do patrimônio" aoLado="uma fotografia por dia, a partir de hoje">
-          {historico.length ? (
-            <Evolucao dados={evolucao} formatar={fmtBRL} />
-          ) : (
-            <Vazio>
-              <p>Ainda não há nenhuma fotografia do patrimônio registrada para esta carteira. Assim que
-                alguém com acesso de edição abrir a carteira, a primeira entra — e o gráfico cresce um
-                ponto por dia a partir daí.</p>
-            </Vazio>
+        <Painel titulo="Evolução do patrimônio">
+          <Evolucao dados={evolucao} formatar={fmtBRL} />
+          {precisaEstimativa && (
+            <p style={{ fontSize: 11.5, color: 'var(--tinta-3)', marginTop: 10, lineHeight: 1.6 }}>
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'var(--ambar)', opacity: .5, marginRight: 5, verticalAlign: 1 }} />
+              Sem cotação histórica disponível, mostra o capital aportado acumulado até aquele mês, não
+              o valor de mercado real.
+              <br />
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'var(--verde)', opacity: .85, marginRight: 5, verticalAlign: 1 }} />
+              Valor de mercado real a partir de quando a carteira começou a ser acompanhada aqui.
+            </p>
           )}
         </Painel>
 
@@ -135,6 +151,8 @@ export default function Resumo({ ir }) {
 
       <TabelaPosicoes posicoes={calc.abertas} ir={ir} />
 
+      <PosicoesEncerradas encerradas={calc.encerradas} />
+
       <Painel titulo="Aportes por mês" aoLado={`${fmtBRL(somaAportes12)} nos últimos 12 meses`}>
         <Colunas dados={mesesAporte} formatar={fmtBRL} />
         {calc.total.semTaxaCambio > 0 && (
@@ -145,5 +163,49 @@ export default function Resumo({ ir }) {
         )}
       </Painel>
     </>
+  )
+}
+
+/**
+ * Mesmo formato de acordeão dos blocos de classe em "Meus Ativos" — um
+ * único bloco aqui, já que posição encerrada não costuma ser numerosa a
+ * ponto de precisar de agrupamento por classe. Começa fechado, porque é
+ * uma consulta ocasional, não algo que se olha toda vez que abre o Resumo.
+ */
+function PosicoesEncerradas({ encerradas }) {
+  const [aberto, setAberto] = useState(false)
+  if (!encerradas.length) return null
+  const totR = encerradas.reduce((s, x) => s + x.realizado, 0)
+
+  return (
+    <div className="secao-grupo" style={{ marginBottom: 20 }}>
+      <div className="secao-grupo-cab" onClick={() => setAberto(a => !a)}>
+        <div className="secao-grupo-titulo">
+          <Seta aberta={aberto} />
+          <strong>Posições encerradas</strong>
+          <span className="conta">{encerradas.length} ativo{encerradas.length === 1 ? '' : 's'}</span>
+        </div>
+        <div className="secao-grupo-metricas">
+          <div className="item"><span className="rotulo">Resultado</span>
+            <span className={'num ' + sinal(totR)}><strong>{fmtBRL(totR)}</strong></span></div>
+        </div>
+      </div>
+      {aberto && (
+        <div className="rolagem">
+          <table>
+            <thead><tr><th>Ativo</th><th>Período</th><th>Custo vendido</th><th>Resultado</th><th>Proventos</th></tr></thead>
+            <tbody>{encerradas.map(x => (
+              <tr key={x.ticker}>
+                <td><span className="ticker">{x.ticker}</span><span className="classe">{x.classe}</span></td>
+                <td className="n">{fmtData(x.primeira)} – {fmtData(x.ultima)}</td>
+                <td className="n">{fmtBRL(x.custoVendido)}</td>
+                <td className={'n ' + sinal(x.realizado)}>{fmtBRL(x.realizado)}</td>
+                <td className={'n ' + (x.proventos > 0 ? 'pos' : 'nulo')}>{x.proventos > 0 ? fmtBRL(x.proventos) : '—'}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
   )
 }

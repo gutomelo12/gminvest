@@ -33,30 +33,64 @@ export default function Proventos({ ir, editando, setEditando }) {
   const rank = Object.entries(porAtivo).map(([t, v]) => ({ t, v })).sort((a, b) => b.v - a.v)
   const meses = proventosPorMes(proventos, 12)
   const soma12 = meses.reduce((s, m) => s + m.valor, 0)
+  const anoAtual = hoje().slice(0, 4)
+  const somaEsteAno = porAno[anoAtual] || 0
+  const [inteiro, cent = '00'] = fmtBRL(total).replace('R$', '').trim().split(',')
+  const [inteiro12, cent12 = '00'] = fmtBRL(soma12).replace('R$', '').trim().split(',')
+  const [inteiroAno, centAno = '00'] = fmtBRL(somaEsteAno).replace('R$', '').trim().split(',')
 
   return (
     <>
-      <Painel titulo="Proventos nos últimos 12 meses" aoLado={`${fmtBRL(soma12)} no período`}>
+      <div className="cartoes">
+        <div className="cartao destaque">
+          <div className="destaque-cab">
+            <span className="selo-mini">$</span>
+            <span className="rotulo" style={{ paddingBottom: 0 }}>Total recebido</span>
+          </div>
+          <div className="valor pos" style={{ marginTop: 10 }}>
+            <span className="moeda">R$</span>{inteiro}<span className="cent">,{cent}</span>
+          </div>
+        </div>
+
+        <div className="cartao destaque">
+          <div className="destaque-cab">
+            <span className="selo-mini">Σ</span>
+            <span className="rotulo" style={{ paddingBottom: 0 }}>Nos últimos 12 meses</span>
+          </div>
+          <div className="valor pos" style={{ marginTop: 10 }}>
+            <span className="moeda">R$</span>{inteiro12}<span className="cent">,{cent12}</span>
+          </div>
+        </div>
+
+        <div className="cartao destaque">
+          <div className="destaque-cab">
+            <span className="selo-mini">{anoAtual.slice(2)}</span>
+            <span className="rotulo" style={{ paddingBottom: 0 }}>Este ano</span>
+          </div>
+          <div className="valor pos" style={{ marginTop: 10 }}>
+            <span className="moeda">R$</span>{inteiroAno}<span className="cent">,{centAno}</span>
+          </div>
+        </div>
+      </div>
+
+      <Painel titulo="Proventos nos últimos 12 meses">
         <Colunas dados={meses} formatar={fmtBRL} />
       </Painel>
 
-      <Painel titulo="De onde vêm os proventos" aoLado="acumulado por ativo">
-        <div className="duas">
-          <div>
-            <div className="rotulo" style={{ marginBottom: 10 }}>Por ano</div>
-            <Barras itens={Object.entries(porAno).sort((a, b) => b[0].localeCompare(a[0]))
-              .map(([a, v]) => ({ chave: a, rotulo: <strong>{a}</strong>, direita: fmtBRL(v), valor: v, cor: 'var(--verde)' }))} />
-          </div>
-          <div>
-            <div className="rotulo" style={{ marginBottom: 10 }}>Maiores pagadores</div>
-            <Barras itens={rank.slice(0, 12).map(x => ({
-              chave: x.t, rotulo: <strong>{x.t}</strong>,
-              direita: `${fmtBRL(x.v)} · ${fmtPctSimples(x.v / total * 100)}`,
-              valor: x.v, cor: corClasse((calc.lista.find(p => p.ticker === x.t) || {}).classe),
-            }))} />
-          </div>
-        </div>
-      </Painel>
+      <div className="duas">
+        <Painel titulo="Por ano">
+          <Barras itens={Object.entries(porAno).sort((a, b) => b[0].localeCompare(a[0]))
+            .map(([a, v]) => ({ chave: a, rotulo: <strong>{a}</strong>, direita: fmtBRL(v), valor: v, cor: 'var(--verde)' }))} />
+        </Painel>
+
+        <Painel titulo="Maiores pagadores" aoLado="acumulado desde o início">
+          <Barras itens={rank.slice(0, 12).map(x => ({
+            chave: x.t, rotulo: <strong>{x.t}</strong>,
+            direita: `${fmtBRL(x.v)} · ${fmtPctSimples(x.v / total * 100)}`,
+            valor: x.v, cor: corClasse((calc.lista.find(p => p.ticker === x.t) || {}).classe),
+          }))} />
+        </Painel>
+      </div>
 
       <ExtratoProventos pvs={pvs} total={total} podeEscrever={podeEscrever} aoEditar={setEditando} />
 
