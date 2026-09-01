@@ -540,18 +540,6 @@ export function ProvedorDados({ children }) {
       if (error) throw error
       await recarregar()
     },
-    /**
-     * Mediana das premissas de outras carteiras para o mesmo ativo — nunca
-     * uma linha identificável, só o número agregado. A sua carteira nunca
-     * entra na própria conta.
-     */
-    async premissasDaComunidade(ticker) {
-      const { data, error } = await sb.rpc('premissas_da_comunidade', {
-        p_ticker: ticker, p_carteira_id: carteiraId,
-      })
-      if (error) throw error
-      return data?.[0] || null
-    },
 
     /** Define o segmento de um ativo (Bancos, Energia…), dentro da classe dele. */
     async salvarSegmento(ticker, segmento) {

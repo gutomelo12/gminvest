@@ -139,13 +139,6 @@ function FormPremissas({ posicao: p, aoFechar }) {
     metodos: existente?.metodos?.length ? existente.metodos : modelosPadraoDaClasse,
   }))
   const [erro, setErro] = useState(null)
-  const [comunidade, setComunidade] = useState(null)
-
-  useEffect(() => {
-    let vivo = true
-    premissasDaComunidade(p.ticker).then(r => { if (vivo) setComunidade(r) }).catch(() => {})
-    return () => { vivo = false }
-  }, [p.ticker])
 
   const num = { ...v, dpa: paraNumero(v.dpa), lpa: paraNumero(v.lpa), vpa: paraNumero(v.vpa) }
   const usaBazin = v.metodos.includes('bazin')
@@ -184,7 +177,6 @@ function FormPremissas({ posicao: p, aoFechar }) {
         ajustar_ir: eFundo ? Boolean(v.ajustar_ir) : null,
         aliquota_ir: eFundo ? paraNumero(v.aliquota_ir) : null,
         metodos: v.metodos, nota: v.nota || null,
-        teto_calculado: av.teto,
         // salvar pelo formulário marca como conferido à mão, e a busca
         // automática passa a respeitar esses números
         origem: 'manual',
@@ -357,13 +349,6 @@ function FormPremissas({ posicao: p, aoFechar }) {
           {paraNumero(v.margem) > 0 && av.faixa && (
             <div className="dica" style={{ marginTop: 10 }}>
               Valores já com {fmtPctSimples(paraNumero(v.margem))} de margem descontada.
-            </div>
-          )}
-
-          {comunidade && comunidade.quantidade > 0 && comunidade.menor_teto != null && (
-            <div className="aviso info" style={{ marginTop: 14, fontSize: 12.5 }}>
-              {comunidade.quantidade} outra{comunidade.quantidade === 1 ? '' : 's'} carteira{comunidade.quantidade === 1 ? '' : 's'} no
-              gmINVEST já calculou um teto para {p.ticker} — o mais conservador: <strong>{fmtBRL(comunidade.menor_teto)}</strong>.
             </div>
           )}
         </div>

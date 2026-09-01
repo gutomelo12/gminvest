@@ -829,3 +829,10 @@ insert into public.segmentos_padrao (ticker, classe, segmento) values
   -- FII — Hospitalar
   ('NSLU11','FII','Hospitalar'), ('HOSP11','FII','Hospitalar')
 on conflict (ticker) do nothing;
+
+-- ------------------------------------------------------------
+--  Retirando o compartilhamento anônimo de preço teto entre carteiras —
+--  função e coluna que só existiam para essa funcionalidade.
+-- ------------------------------------------------------------
+drop function if exists public.premissas_da_comunidade(text, uuid);
+alter table public.premissas_teto drop column if exists teto_calculado;

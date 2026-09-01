@@ -1,5 +1,5 @@
-const ATUALIZADO_TERMOS = '31 de agosto de 2026'
-const ATUALIZADO_PRIVACIDADE = '31 de agosto de 2026'
+const ATUALIZADO_TERMOS = '1 de setembro de 2026'
+const ATUALIZADO_PRIVACIDADE = '1 de setembro de 2026'
 
 function Secao({ n, titulo, children }) {
   return (
@@ -51,21 +51,13 @@ export function TermosDeUso() {
           sistema avisa isso na tela, em vez de inventar um número.</p>
       </Secao>
 
-      <Secao n={5} titulo="Comparação anônima entre carteiras">
-        <p>Ao salvar as premissas de preço teto de um ativo, um número agregado (a mediana ou o menor
-          valor calculado, dependendo da tela) pode ficar visível para outras contas do gmINVEST que
-          também acompanham o mesmo ativo, como referência de comparação. Isso nunca identifica de qual
-          carteira ou pessoa o número veio — só o valor agregado é compartilhado, nunca uma linha
-          individual.</p>
-      </Secao>
-
-      <Secao n={6} titulo="O que o gmINVEST não faz">
+      <Secao n={5} titulo="O que o gmINVEST não faz">
         <p>O gmINVEST não envia comunicações promocionais, não tem parceiros comerciais e não usa seus
           dados para publicidade. Os únicos e-mails enviados pelo sistema são os estritamente necessários
           para o funcionamento da sua conta, como convites de acesso.</p>
       </Secao>
 
-      <Secao n={7} titulo="Cancelamento e exclusão de dados">
+      <Secao n={6} titulo="Cancelamento e exclusão de dados">
         <p>Você pode sair da sua conta a qualquer momento. Você também pode excluir sua própria conta
           diretamente em Ajustes → Sua conta, a qualquer momento — a ação é permanente e exige digitar
           seu e-mail para confirmar. Excluir a conta remove toda carteira sua que mais ninguém acessa,
@@ -77,13 +69,13 @@ export function TermosDeUso() {
           daquela carteira ou do próprio funcionamento do sistema.</p>
       </Secao>
 
-      <Secao n={8} titulo="Alterações nestes termos">
+      <Secao n={7} titulo="Alterações nestes termos">
         <p>Estes termos podem ser alterados a qualquer momento. Mudanças relevantes serão comunicadas
           dentro do próprio sistema. O uso continuado do gmINVEST após uma alteração vale como aceite dos
           novos termos.</p>
       </Secao>
 
-      <Secao n={9} titulo="Limitação de responsabilidade">
+      <Secao n={8} titulo="Limitação de responsabilidade">
         <p>O gmINVEST é fornecido "como está". Na maior extensão permitida por lei, não nos
           responsabilizamos por perdas financeiras, decisões de investimento tomadas com base nas
           informações do sistema, ou indisponibilidade temporária do serviço.</p>
@@ -109,7 +101,6 @@ export function PoliticaPrivacidade() {
         <ul style={{ margin: '8px 0 0 18px' }}>
           <li>Calcular e exibir a evolução, o resultado e o preço teto da sua carteira</li>
           <li>Permitir o compartilhamento de uma carteira com quem você escolher</li>
-          <li>Gerar o número agregado e anônimo de comparação de preço teto descrito nos Termos de Uso</li>
           <li>Enviar e-mails estritamente funcionais, como convites de acesso</li>
         </ul>
         <p style={{ marginTop: 8 }}>Não enviamos comunicação promocional, não fazemos publicidade e não
